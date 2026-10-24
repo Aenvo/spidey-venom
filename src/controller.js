@@ -8,25 +8,41 @@ const coarse = matchMedia('(pointer: coarse)').matches;
 const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const NS = 'http://www.w3.org/2000/svg';
 const svgEl = (tag, attrs = {}) => { const n = document.createElementNS(NS, tag); for (const k in attrs) n.setAttribute(k, attrs[k]); return n; };
-const THEMES = ['spidey', 'venom'];
+const THEMES = Object.keys(BUTTON_THEMES);
+for (const t of THEMES) {
+  const config = BUTTON_THEMES[t], canvas = document.createElement('canvas'), button = document.createElement('button');
+  canvas.id = `stage-${t}`; canvas.className = 'stage'; canvas.setAttribute('aria-hidden', 'true');
+  button.id = `btn-${t}`; button.className = 'goo-btn'; button.type = 'button'; button.textContent = config.label; button.setAttribute('aria-label', config.aria);
+  if (config.electricity) {
+    button.dataset.electric = '';
+    const cssColor = c => `rgb(${c.map(v => Math.round(Math.pow(v, 1 / 2.2) * 255)).join(' ')})`;
+    button.style.setProperty('--fallback-base', cssColor(config.suit.base));
+    button.style.setProperty('--fallback-icon', cssColor(config.iconColor));
+    button.style.setProperty('--electric-color', config.electricity.color);
+  }
+  $('buttons').append(canvas, button);
+}
 const LS = 'spidey-x-venom:v1';
 let store = {};
 try { store = JSON.parse(localStorage.getItem(LS) || '{}') || {}; } catch { store = {}; }
 const save = () => { try { localStorage.setItem(LS, JSON.stringify(store)); } catch {} };
 
 // ── positions (page px, centre of each pill); persisted as fractions of the viewport
-const pos = { spidey: { x: innerWidth * 0.35, y: innerHeight * 0.62 }, venom: { x: innerWidth * 0.65, y: innerHeight * 0.62 } };
+const pos = Object.fromEntries(THEMES.map(t => [t, { x: innerWidth / 2, y: innerHeight / 2 }]));
 function defaults() {
   const W = innerWidth, H = innerHeight;
   const hero = { bottom: H * 0.12 }, foot = { top: H - 60 };
   if (W < 761) {
     const top = hero.bottom + 58, bot = foot.top - 52;
-    const gap = clamp((bot - top) * 0.62, 96, 170), mid = (top + bot) / 2;
-    return { spidey: { x: W / 2, y: mid - gap / 2 }, venom: { x: W / 2, y: mid + gap / 2 } };
+    const gap = clamp((bot - top) / Math.max(1, THEMES.length - 1), 110, 180), mid = (top + bot) / 2;
+    return Object.fromEntries(THEMES.map((t, i) => [t, { x: W / 2, y: mid + (i - (THEMES.length - 1) / 2) * gap }]));
   }
-  const y = H * 0.5;
-  const dx = clamp(W * 0.18, 180, 330);
-  return { spidey: { x: W / 2 - dx, y }, venom: { x: W / 2 + dx, y } };
+  const columns = 2, rows = Math.ceil(THEMES.length / columns);
+  const dx = clamp(W * 0.18, 180, 330), dy = clamp(H * 0.3, 200, 280);
+  return Object.fromEntries(THEMES.map((t, i) => {
+    const row = Math.floor(i / columns), count = Math.min(columns, THEMES.length - row * columns);
+    return [t, { x: W / 2 + (i % columns - (count - 1) / 2) * dx * 2, y: H / 2 + (row - (rows - 1) / 2) * dy }];
+  }));
 }
 function clampPos(theme, x, y) {
   const s = engines[theme] ? engines[theme].size() : { hw: 90, hh: 30 };
@@ -50,13 +66,9 @@ function remember() {
 }
 
 // ── engines
-const PARAMS = {
-  // web silk: thin, fast, taut, barely sagging
-  spidey: { thickness: 1.0, slither: 0.3, whip: 1.45, magnet: 1.1, gravity: 380, creep: 0.12, snapStretch: 1.9, maxLen: 172, grip: 1.25 },
-  // the symbiote: heavier, slithery, with a cool blue sheen
-  venom: { sheen: 0.55, slither: 1.25, magnet: 1.8, thickness: 1.05 },
-};
 const engines = {};
+const electric = Object.fromEntries(THEMES.filter(t => BUTTON_THEMES[t].electricity).map(t => [t, createElectricity(BUTTON_THEMES[t].electricity, reduced)]));
+const defenses = Object.fromEntries(Object.keys(electric).map(t => [t, { target: null, nextStrike: 0, nextRescue: 0, nextKnockback: 0, phase: 'idle', ally: null, rescueHitAt: 0, attackAfter: 0 }]));
 function fallback(t) {
   const el = $(`btn-${t}`), p = pos[t];
   return {
@@ -65,23 +77,133 @@ function fallback(t) {
     edgeDist(x, y) { return Math.hypot(Math.max(Math.abs(x - p.x) - 55, 0), y - p.y) - 30; },
     nearest() { return [p.x, p.y]; }, inZone: () => false, pointer() {}, leave() {}, target() {}, press() {}, fling() {},
     size: () => ({ hw: 85, hh: 30 }),
+    infection: 0, cleanse() {}, shock() {},
   };
 }
 // dropped close together they fight: each reaches for the other, and the symbiote slowly takes Spidey's suit.
-// Nothing reaches across while a button is being dragged
-const fighting = { spidey: false, venom: false };
-function tick(e) {
-  const t = e.theme, other = engines[t === 'spidey' ? 'venom' : 'spidey'];
-  if (!other) return;
-  const c = pos[t], p = other.nearest(c.x, c.y, 5);
-  const d = e.edgeDist(p[0], p[1]);
-  const on = !drag && !e.hasPointer && d > -2 && d < (fighting[t] ? 150 : 100);
-  fighting[t] = on;
-  e.target(on ? p[0] : null, p[1]);
-  if (t === 'spidey') {
-    const v = pos.venom, dx = v.x - c.x, dy = v.y - c.y, l = Math.hypot(dx, dy) || 1;
-    e.setInfect?.(fighting.venom ? 1 : 0, dx / l, dy / l);
+// Only the pair being dragged pauses; other ongoing infections keep their state.
+const fighting = {};
+const knockbacks = {};
+let lastCombatTime = performance.now();
+const edgeGap = (a, b) => { const p = engines[b].nearest(pos[a].x, pos[a].y, COMBAT.inset); return engines[a].edgeDist(...p); };
+const sendWeb = (from, to, now) => {
+  const resolve = () => engines[to].nearest(pos[from].x, pos[from].y);
+  engines[from].shootAt?.(...resolve(), resolve);
+  electric[from].burst(now);
+};
+function refreshTargets(now, effects = false) {
+  for (const e of list) e.refreshTargets?.();
+  if (effects) for (const e of list) electric[e.theme]?.update(e, now, true);
+}
+const webTouches = (paths, target, tolerance) => paths.some(points => points.some((p, i) => i > 0 && Math.hypot(p[0] - points[0][0], p[1] - points[0][1]) > tolerance && engines[target].edgeDist(...p) <= tolerance));
+function repel(attacker, defender, distance) {
+  const a = pos[attacker], b = pos[defender], angle = Math.atan2(a.y - b.y, a.x - b.x);
+  const candidates = [0, Math.PI / 3, -Math.PI / 3, Math.PI * 2 / 3, -Math.PI * 2 / 3].map(turn => clampPos(attacker, a.x + Math.cos(angle + turn) * distance, a.y + Math.sin(angle + turn) * distance));
+  candidates.sort((p, q) => Math.hypot(q[0] - b.x, q[1] - b.y) - Math.hypot(p[0] - b.x, p[1] - b.y));
+  const [x, y] = candidates[0];
+  knockbacks[attacker] = { vx: (x - a.x) * COMBAT.knockbackDamping, vy: (y - a.y) * COMBAT.knockbackDamping };
+}
+function moveKnockbacks(now) {
+  const dt = clamp((now - lastCombatTime) / 1000, 0, 0.05); lastCombatTime = now;
+  const decay = Math.exp(-COMBAT.knockbackDamping * dt), step = (1 - decay) / COMBAT.knockbackDamping;
+  for (const [t, velocity] of Object.entries(knockbacks)) {
+    if (drag?.e.theme === t) { delete knockbacks[t]; continue; }
+    const p = pos[t], [x, y] = clampPos(t, p.x + velocity.vx * step, p.y + velocity.vy * step);
+    if (x === p.x && dt > 0) velocity.vx = 0;
+    if (y === p.y && dt > 0) velocity.vy = 0;
+    p.x = x; p.y = y; engines[t].fling(velocity.vx, velocity.vy); engines[t].place(); placeTag(t);
+    velocity.vx *= decay; velocity.vy *= decay;
+    if (Math.hypot(velocity.vx, velocity.vy) < COMBAT.settleSpeed) { delete knockbacks[t]; remember(); }
   }
+}
+function updateCombat(now) {
+  moveKnockbacks(now);
+  refreshTargets(now);
+  const requested = {}, protectedBy = {}, guardians = {};
+  const paths = Object.fromEntries(Object.keys(electric).map(t => [t, engines[t].webPaths?.() || []]));
+  for (const t of THEMES) {
+    const e = engines[t], candidates = BUTTON_THEMES[t].targets.filter(id => engines[id]);
+    candidates.sort((a, b) => edgeGap(t, a) - edgeGap(t, b));
+    const other = candidates[0], gap = other ? edgeGap(t, other) : Infinity;
+    const pairDragged = drag && (drag.e.theme === t || drag.e.theme === other);
+    if (!pairDragged && !e.hasPointer && gap > -2 && gap < (fighting[t] ? COMBAT.release : COMBAT.reach)) requested[t] = other;
+  }
+  for (const t of Object.keys(electric)) {
+    const settings = BUTTON_THEMES[t].electricity, state = defenses[t];
+    for (const ally of THEMES) if (ally !== t && BUTTON_THEMES[ally].canBeInfected && edgeGap(t, ally) < settings.rescueRange) {
+      guardians[ally] = t;
+      const threatened = THEMES.some(id => requested[id] === ally && BUTTON_THEMES[id].infects);
+      if (!state.ally && engines[ally].infection > settings.rescueComplete) {
+        state.ally = ally; state.phase = 'rescue'; state.rescueHitAt = 0;
+        state.target = THEMES.find(id => requested[id] === ally && BUTTON_THEMES[id].infects) || state.target || THEMES.filter(id => BUTTON_THEMES[id].infects).sort((a, b) => edgeGap(t, a) - edgeGap(t, b))[0];
+      }
+      if ((engines[ally].infection > 0.001 || threatened) && now >= state.nextRescue) {
+        sendWeb(t, ally, now); state.nextRescue = now + settings.attackInterval;
+      }
+      if (webTouches(paths[t], ally, settings.contactTolerance)) {
+        engines[ally].cleanse(); protectedBy[ally] = t;
+        if (state.ally === ally) { electric[t].combat(now); if (!state.rescueHitAt) state.rescueHitAt = now; }
+      }
+    }
+    if (state.ally) {
+      if (edgeGap(t, state.ally) > settings.rescueRange) { state.ally = null; state.target = null; state.phase = 'idle'; }
+      else if (state.rescueHitAt && engines[state.ally].infection <= settings.rescueComplete && now - state.rescueHitAt >= settings.rescueMinDuration) {
+        state.ally = null; state.phase = 'attack'; state.attackAfter = now + settings.transferDelay;
+      }
+    }
+  }
+  for (const [attacker, target] of Object.entries(requested)) {
+    if (!BUTTON_THEMES[attacker].infects) continue;
+    const guardian = guardians[target] || (electric[target] ? target : null);
+    if (!guardian) continue;
+    defenses[guardian].target = attacker;
+    if (defenses[guardian].phase === 'idle') defenses[guardian].phase = 'attack';
+    if (protectedBy[target]) delete requested[attacker];
+  }
+  for (const [guardian, state] of Object.entries(defenses)) {
+    const settings = BUTTON_THEMES[guardian].electricity;
+    if (state.phase === 'rescue' || now < state.attackAfter) { if (state.target) engines[state.target].stopShock?.(); continue; }
+    if (!state.target) {
+      state.target = THEMES.filter(id => BUTTON_THEMES[id].infects && edgeGap(guardian, id) < settings.triggerRange).sort((a, b) => edgeGap(guardian, a) - edgeGap(guardian, b))[0] || null;
+      if (state.target) state.phase = 'attack';
+    }
+    const contact = THEMES.find(id => BUTTON_THEMES[id].infects && edgeGap(guardian, id) <= settings.attackRange && webTouches(paths[guardian], id, settings.contactTolerance));
+    if (contact) { state.target = contact; state.phase = 'attack'; }
+    const attacker = state.target;
+    if (!attacker) continue;
+    if (edgeGap(guardian, attacker) > settings.attackRange) { engines[attacker].stopShock?.(); state.target = null; state.phase = 'idle'; continue; }
+    {
+      requested[guardian] = attacker;
+      if (now >= state.nextStrike) {
+        state.nextStrike = now + settings.attackInterval;
+        sendWeb(guardian, attacker, now);
+      }
+      if (webTouches(paths[guardian], attacker, settings.contactTolerance)) {
+        delete requested[attacker];
+        engines[attacker].shock(settings.shockDuration);
+        electric[guardian].combat(now);
+        if (settings.knockback && now >= state.nextKnockback && drag?.e.theme !== attacker) {
+          state.nextKnockback = now + settings.knockback.cooldown;
+          repel(attacker, guardian, settings.knockback.distance);
+        }
+      } else {
+        engines[attacker].stopShock?.();
+      }
+    }
+  }
+  for (const t of THEMES) {
+    const other = requested[t], e = engines[t]; fighting[t] = !!other;
+    const p = other ? engines[other].nearest(pos[t].x, pos[t].y, COMBAT.inset) : [null, null];
+    e.target(...p);
+    const infector = THEMES.find(id => requested[id] === t && BUTTON_THEMES[id].infects);
+    const dx = infector ? pos[infector].x - pos[t].x : 1, dy = infector ? pos[infector].y - pos[t].y : 0, length = Math.hypot(dx, dy) || 1;
+    e.setInfect?.(infector && !protectedBy[t] ? 1 : 0, dx / length, dy / length);
+  }
+}
+function tick(e) {
+  const now = performance.now();
+  if (e.theme === THEMES[0]) updateCombat(now);
+  electric[e.theme]?.update(e, now);
 }
 const onEngage = () => document.body.classList.toggle('is-engaged', THEMES.some((t) => engines[t]?.engaged));
 
@@ -89,9 +211,9 @@ const scaleFor = () => (innerWidth >= 761 ? clamp(Math.min(innerWidth / 1080, in
 layoutAll();
 for (const t of THEMES) {
   const e = createGoo({
-    theme: t, label: t.toUpperCase(), aria: $(`btn-${t}`).getAttribute('aria-label'),
+    ...BUTTON_THEMES[t], labelStyle: BUTTON_LABEL_STYLE, theme: t,
     canvas: $(`stage-${t}`), hitEl: $(`btn-${t}`), pos: pos[t], pad: coarse ? 215 : 250, maxPpv: coarse ? 1.75 : 1.6,
-    params: PARAMS[t], tick, onEngage, scale: scaleFor(),
+    tick, onEngage, scale: scaleFor(),
   });
   engines[t] = e || fallback(t);
   engines[t].place();
@@ -167,7 +289,7 @@ for (const e of list) {
     const step = ev.shiftKey ? 48 : 14, p = pos[e.theme];
     [p.x, p.y] = clampPos(e.theme, p.x + k[0] * step, p.y + k[1] * step);
     e.fling(k[0] * step * 40, k[1] * step * 40);
-    raise(e); e.place(); placeTag(e.theme); markMoved(); remember();
+    raise(e); e.place(); refreshTargets(performance.now(), true); placeTag(e.theme); markMoved(); remember();
   });
 }
 function markMoved() { if (!store.moved) { store.moved = true; save(); } document.body.classList.add('has-moved'); }
@@ -182,7 +304,7 @@ function moveDrag(ev) {
   const [x, y] = clampPos(e.theme, ev.clientX + d.ox, ev.clientY + d.oy);
   e.fling((x - p.x) / dt, (y - p.y) / dt);
   p.x = x; p.y = y; d.lt = now;
-  e.place(); placeTag(e.theme);
+  e.place(); refreshTargets(now, true); placeTag(e.theme);
 }
 function endDrag(ev, cancel) {
   if (!drag || ev.pointerId !== drag.id) return;
@@ -208,6 +330,7 @@ $('reset').addEventListener('click', () => {
 function strike(e) {
   navigator.vibrate?.(e.theme === 'venom' ? [10, 40, 18] : 12);
   e.shoot?.();
+  electric[e.theme]?.burst(performance.now());
 }
 
 })();

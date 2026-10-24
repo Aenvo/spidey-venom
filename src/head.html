@@ -100,6 +100,8 @@
   /* ── stage ── */
   .stage { position: fixed; left: 0; top: 0; display: block; pointer-events: none; z-index: 5; will-change: transform; }
   .stage.is-top { z-index: 6; }
+  .electric-webs { position: fixed; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; z-index: 7; filter: drop-shadow(0 0 4px var(--electric-color)); }
+  body.no-gl .goo-btn[data-electric] { background: var(--fallback-base); color: var(--fallback-icon); }
   .goo-btn {
     position: fixed; left: 0; top: 0; margin: 0; padding: 0; border: 0; border-radius: 999px;
     background: transparent; color: transparent; font: 700 18px/1 system-ui, sans-serif; z-index: 8;
@@ -107,9 +109,21 @@
   }
   .goo-btn:focus { outline: none; }
   .goo-btn:focus-visible { outline: 2px dashed var(--ink); outline-offset: 16px; }
+  .goo-btn[data-electric]:focus-visible { outline: none; box-shadow: inset 0 -2px 0 var(--electric-color); }
   body.no-gl .goo-btn { color: #f4f4f6; letter-spacing: 0.12em; font: 400 20px/1 "Anton", Impact, sans-serif; box-shadow: 0 18px 30px -16px rgb(0 0 0 / 0.6), inset 0 1px 0 rgb(255 255 255 / 0.2); }
   body.no-gl #btn-venom { background: radial-gradient(120% 140% at 30% 20%, #3a3846, #0d0c10 60%); }
-  body.no-gl #btn-spidey { background: radial-gradient(120% 140% at 30% 20%, #f0353f, #8f0b12 70%); }
+  body.no-gl #btn-spidey {
+    background: radial-gradient(120% 140% at 30% 20%, rgb(255 255 255 / 0.2), transparent 65%),
+                linear-gradient(90deg, var(--blue) 19%, var(--red) 31%, var(--red) 69%, var(--blue) 81%), var(--blue);
+    background-size: 100% 100%, 100% 100%;
+    background-position: center;
+    background-repeat: no-repeat;
+    animation: suit-pulse 2.85s ease-in-out infinite alternate;
+  }
+  @keyframes suit-pulse {
+    from { background-size: 100% 100%, 90% 100%; }
+    to { background-size: 100% 100%, 110% 100%; }
+  }
 
 
   /* ── fx ── */
@@ -158,6 +172,7 @@
     .hero { top: 36px; } .title { font-size: clamp(40px, 7vw, 90px); }
   }
   @media (prefers-reduced-motion: reduce) {
+    body.no-gl #btn-spidey { animation: none; }
     .thread, .drips i, .symbiote .blob, .symbiote .reach { animation: none; }
     .burst { animation: fadeout 1.2s ease 0.4s forwards; transform: translate(var(--x), var(--y)) rotate(var(--r)); }
     .ink { transition: none; }
@@ -165,10 +180,7 @@
 </style>
 </head>
 <body>
-<canvas class="stage" id="stage-spidey" aria-hidden="true"></canvas>
-<canvas class="stage" id="stage-venom" aria-hidden="true"></canvas>
-<button class="goo-btn" id="btn-spidey" type="button" aria-label="Spidey: tap to shoot a web, drag or use arrow keys to move">Spidey</button>
-<button class="goo-btn" id="btn-venom" type="button" aria-label="Venom: tap to unleash the symbiote, drag or use arrow keys to move">Venom</button>
+<div id="buttons"></div>
 <footer class="bottom">
   <div class="hint"><button type="button" id="reset" aria-label="Reset button positions" title="Reset positions"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></button></div>
 </footer>
