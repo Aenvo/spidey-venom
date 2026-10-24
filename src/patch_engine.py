@@ -29,7 +29,7 @@ document.body.classList.add('has-gl');""", "  document.body.classList.add('no-gl
 rep("uniform vec4 uHand2;\nout vec4 outC;\n\nvec3 KEY;", "uniform vec4 uHand2;\nuniform float uTheme;\nuniform vec4 uInfect;\nout vec4 outC;\n\nvec3 KEY;")
 
 SUIT = r'''
-// Spidey's suit: deep blue with a fine embossed web (rays + scalloped rings) that quiets behind the letters.
+// Spidey's suit: the original red centre panel gently breathes between blue sides.
 // uInfect: the symbiote takes the suit over from the side facing Venom while they fight
 vec3 suitAlbedo(vec2 p, float strand) {
   vec2 q = p - uBtnP.xy, b = uBtnP.zw;
@@ -47,8 +47,14 @@ vec3 suitAlbedo(vec2 p, float strand) {
   float line = max((1.0 - smoothstep(w, w + 1.1 * px, dRay)) * smoothstep(3.0, 7.0, r),
                    (1.0 - smoothstep(w, w + 1.1 * px, dRing)) * smoothstep(4.0, 8.0, r));
   line *= smoothstep(0.8, 2.6, u) * mix(0.35, 1.0, smoothstep(7.0, 13.0, abs(q.y)));
-  vec3 alb = vec3(0.018, 0.085, 0.52) * (0.9 + 0.1 * smoothstep(0.0, b.y, u));
-  alb = mix(alb, vec3(0.004, 0.012, 0.07), line * 0.75);
+  vec2 suitUV = q / max(b, vec2(1.0));
+  float redScale = 1.0 + 0.1 * sin(uTime * 1.1);
+  float panelPosition = (abs(suitUV.x) + 0.08 * suitUV.y * suitUV.y) / redScale;
+  float redMask = 1.0 - smoothstep(0.5, 0.62, panelPosition);
+  vec3 alb = mix(vec3(0.018, 0.085, 0.52), vec3(0.58, 0.012, 0.022), redMask);
+  alb *= 0.9 + 0.1 * smoothstep(0.0, b.y, u);
+  vec3 webInk = mix(vec3(0.004, 0.012, 0.07), vec3(0.07, 0.002, 0.006), redMask);
+  alb = mix(alb, webInk, line * 0.75);
   float sF = dot(q, uInfect.xy) / b.x;
   float front = 1.0 - 2.5 * uInfect.z + 0.4 * (vn(p * 0.08 + vec2(uTime * 0.25, -uTime * 0.18)) - 0.5);
   float inf = smoothstep(front - 0.07, front + 0.07, sF) * step(0.003, uInfect.z);
@@ -313,7 +319,7 @@ rep("  fling(vx, vy) {", """  shoot() {
   setInfect(target, dx, dy) { infect.target = target; if (target > 0) { infect.dx = dx; infect.dy = dy; } },
   fling(vx, vy) {""")
 rep("  render();\n  // adaptive resolution if the GPU struggles\n  if (frameEma > 1 / 40 &&",
-    "  // nothing moving: redraw a few times a second for the slow glint instead of every frame\n  const busy = strands.length || crawlers.length || ripples.length || cur.present || hand.on || shotQueue.length ||\n    btn.intro < 0.999 || labelAmt < 0.999 || Math.abs(btn.liftV) + Math.abs(btn.pressV) + Math.abs(btn.sxV) + Math.abs(btn.syV) > 0.02 ||\n    Math.abs(infect.target - infect.amt) > 0.002 || btn.lift > 0.002;\n  if (busy || ++idleFrames % 6 === 0) render();\n  // adaptive resolution if the GPU struggles\n  if (busy && frameEma > 1 / 50 &&")
+    "  // Keep Spidey's red patch pulsing while idle; Venom only needs its slow glint.\n  const busy = strands.length || crawlers.length || ripples.length || cur.present || hand.on || shotQueue.length ||\n    btn.intro < 0.999 || labelAmt < 0.999 || Math.abs(btn.liftV) + Math.abs(btn.pressV) + Math.abs(btn.sxV) + Math.abs(btn.syV) > 0.02 ||\n    Math.abs(infect.target - infect.amt) > 0.002 || btn.lift > 0.002;\n  const idleStride = cfg.theme === 'spidey' && !reduced ? 2 : 6;\n  if (busy || ++idleFrames % idleStride === 0) render();\n  // adaptive resolution if the GPU struggles\n  if (busy && frameEma > 1 / 50 &&")
 rep("let last = performance.now(), acc = 0,", "let idleFrames = 0;\nlet last = performance.now(), acc = 0,")
 open('engine.js', 'w', encoding='utf-8', newline='').write(src)
 print('ok', len(src))

@@ -109,7 +109,18 @@
   .goo-btn:focus-visible { outline: 2px dashed var(--ink); outline-offset: 16px; }
   body.no-gl .goo-btn { color: #f4f4f6; letter-spacing: 0.12em; font: 400 20px/1 "Anton", Impact, sans-serif; box-shadow: 0 18px 30px -16px rgb(0 0 0 / 0.6), inset 0 1px 0 rgb(255 255 255 / 0.2); }
   body.no-gl #btn-venom { background: radial-gradient(120% 140% at 30% 20%, #3a3846, #0d0c10 60%); }
-  body.no-gl #btn-spidey { background: radial-gradient(120% 140% at 30% 20%, #f0353f, #8f0b12 70%); }
+  body.no-gl #btn-spidey {
+    background: radial-gradient(120% 140% at 30% 20%, rgb(255 255 255 / 0.2), transparent 65%),
+                linear-gradient(90deg, var(--blue) 19%, var(--red) 31%, var(--red) 69%, var(--blue) 81%), var(--blue);
+    background-size: 100% 100%, 100% 100%;
+    background-position: center;
+    background-repeat: no-repeat;
+    animation: suit-pulse 2.85s ease-in-out infinite alternate;
+  }
+  @keyframes suit-pulse {
+    from { background-size: 100% 100%, 90% 100%; }
+    to { background-size: 100% 100%, 110% 100%; }
+  }
 
 
   /* ── fx ── */
@@ -158,6 +169,7 @@
     .hero { top: 36px; } .title { font-size: clamp(40px, 7vw, 90px); }
   }
   @media (prefers-reduced-motion: reduce) {
+    body.no-gl #btn-spidey { animation: none; }
     .thread, .drips i, .symbiote .blob, .symbiote .reach { animation: none; }
     .burst { animation: fadeout 1.2s ease 0.4s forwards; transform: translate(var(--x), var(--y)) rotate(var(--r)); }
     .ink { transition: none; }
@@ -776,7 +788,7 @@ vec3 faceWindow(vec2 b) {
   return view * 0.14 * fade;
 }
 
-// Spidey's suit: deep blue with a fine embossed web (rays + scalloped rings) that quiets behind the letters.
+// Spidey's suit: the original red centre panel gently breathes between blue sides.
 // uInfect: the symbiote takes the suit over from the side facing Venom while they fight
 vec3 suitAlbedo(vec2 p, float strand) {
   vec2 q = p - uBtnP.xy, b = uBtnP.zw;
@@ -794,8 +806,14 @@ vec3 suitAlbedo(vec2 p, float strand) {
   float line = max((1.0 - smoothstep(w, w + 1.1 * px, dRay)) * smoothstep(3.0, 7.0, r),
                    (1.0 - smoothstep(w, w + 1.1 * px, dRing)) * smoothstep(4.0, 8.0, r));
   line *= smoothstep(0.8, 2.6, u) * mix(0.35, 1.0, smoothstep(7.0, 13.0, abs(q.y)));
-  vec3 alb = vec3(0.018, 0.085, 0.52) * (0.9 + 0.1 * smoothstep(0.0, b.y, u));
-  alb = mix(alb, vec3(0.004, 0.012, 0.07), line * 0.75);
+  vec2 suitUV = q / max(b, vec2(1.0));
+  float redScale = 1.0 + 0.1 * sin(uTime * 1.1);
+  float panelPosition = (abs(suitUV.x) + 0.08 * suitUV.y * suitUV.y) / redScale;
+  float redMask = 1.0 - smoothstep(0.5, 0.62, panelPosition);
+  vec3 alb = mix(vec3(0.018, 0.085, 0.52), vec3(0.58, 0.012, 0.022), redMask);
+  alb *= 0.9 + 0.1 * smoothstep(0.0, b.y, u);
+  vec3 webInk = mix(vec3(0.004, 0.012, 0.07), vec3(0.07, 0.002, 0.006), redMask);
+  alb = mix(alb, webInk, line * 0.75);
   float sF = dot(q, uInfect.xy) / b.x;
   float front = 1.0 - 2.5 * uInfect.z + 0.4 * (vn(p * 0.08 + vec2(uTime * 0.25, -uTime * 0.18)) - 0.5);
   float inf = smoothstep(front - 0.07, front + 0.07, sF) * step(0.003, uInfect.z);
@@ -1988,11 +2006,12 @@ function frame(now) {
   if (n === 40) acc = 0;
   // the OS cursor hides while the rendered 3D hand stands in for it
   if (hand.on !== api.engaged) { api.engaged = hand.on; cfg.onEngage?.(); }
-  // nothing moving: redraw a few times a second for the slow glint instead of every frame
+  // Keep Spidey's red patch pulsing while idle; Venom only needs its slow glint.
   const busy = strands.length || crawlers.length || ripples.length || cur.present || hand.on || shotQueue.length ||
     btn.intro < 0.999 || labelAmt < 0.999 || Math.abs(btn.liftV) + Math.abs(btn.pressV) + Math.abs(btn.sxV) + Math.abs(btn.syV) > 0.02 ||
     Math.abs(infect.target - infect.amt) > 0.002 || btn.lift > 0.002;
-  if (busy || ++idleFrames % 6 === 0) render();
+  const idleStride = cfg.theme === 'spidey' && !reduced ? 2 : 6;
+  if (busy || ++idleFrames % idleStride === 0) render();
   // adaptive resolution if the GPU struggles
   if (busy && frameEma > 1 / 50 && dt < 0.09 && document.visibilityState === 'visible') slowFor += dt; else slowFor = 0;
   if (slowFor > 1.2 && quality > 0.55) { quality -= 0.1; slowFor = 0; alloc(); } // never drop far enough to look pixelated
