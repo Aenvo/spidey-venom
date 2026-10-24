@@ -225,6 +225,10 @@ const BUTTON_THEMES = {
     suit: { ...SPIDER_SUIT, base: SUIT_COLORS.black, accent: SUIT_COLORS.black,
       web: SUIT_COLORS.red, webAccent: SUIT_COLORS.red, webWidth: 0.15, webStrength: 0.1, panel: false },
     iconColor: SUIT_COLORS.red, labelColor: SUIT_COLORS.labelGray, labelPolish: 0,
+    hover: { color: [0.015, 0.19, 0.65], opacity: 0, feather: 2,
+      webOpacity: 0.25, labelOpacity: 0.48, outlineWidth: 1, outlineOpacity: 0.42, boundaryOpacity: 0.65,
+      innerWidth: 7, innerOpacity: 0.18, shadowOpacity: 0.02,
+      rimWidth: 0.65, warp: 12, edgeColor: [0.5, 0.8, 1], fadeSpeed: 5 },
     canBeInfected: false, targets: [], shotRadius: 1.45,
     params: ELECTRIC_SILK,
     electricity: { color: '#39baff', core: '#def6ff', width: 0.6, jitter: 0.35,
@@ -267,7 +271,7 @@ function reframeWeb(strand, frame) {
 'use strict';
 function createGoo(cfg) {
 const suit = cfg.suit, zeroColor = [0, 0, 0];
-const materialColors = [['uSuitBase', suit?.base], ['uSuitAccent', suit?.accent], ['uWebBase', suit?.web], ['uWebAccent', suit?.webAccent], ['uStrandColor', suit?.strand]].map(([key, value]) => [key, value || zeroColor]);
+const materialColors = [['uSuitBase', suit?.base], ['uSuitAccent', suit?.accent], ['uWebBase', suit?.web], ['uWebAccent', suit?.webAccent], ['uStrandColor', suit?.strand], ['uHoverColor', cfg.hover?.color], ['uHoverEdgeColor', cfg.hover?.edgeColor]].map(([key, value]) => [key, value || zeroColor]);
 // ───────────────────────────── constants & state ─────────────────────────────
 const NP = 14;            // points per tendril
 const MAXB = 5;           // blobs (cursor droplet + crawlers)
@@ -703,10 +707,11 @@ uniform sampler2D uArrowCol;
 uniform float uMorph;
 uniform vec4 uHand;
 uniform vec4 uHand2;
-uniform float uTheme, uWebStrength, uWebWidth, uPanel, uIconEdge, uLabelPolish;
+uniform float uTheme, uWebStrength, uWebWidth, uPanel, uIconEdge, uLabelPolish, uHoverProgress;
 uniform vec2 uPulse;
-uniform vec3 uSuitBase, uSuitAccent, uWebBase, uWebAccent, uStrandColor, uLabelColor, uIconColor;
-uniform vec4 uInfect;
+uniform vec4 uHoverEdge;
+uniform vec3 uSuitBase, uSuitAccent, uWebBase, uWebAccent, uStrandColor, uLabelColor, uIconColor, uHoverColor, uHoverEdgeColor;
+uniform vec4 uInfect, uHoverStyle, uHoverInk;
 out vec4 outC;
 
 vec3 KEY;
@@ -878,7 +883,7 @@ vec3 faceWindow(vec2 b) {
 
 // Spidey's suit: the original red centre panel gently breathes between blue sides.
 // uInfect: the symbiote takes the suit over from the side facing Venom while they fight
-vec3 suitAlbedo(vec2 p, float strand) {
+float suitWeb(vec2 p) {
   vec2 q = p - uBtnP.xy, b = uBtnP.zw;
   float a = b.x - b.y;
   float u = -(length(vec2(max(abs(q.x) - a, 0.0), q.y)) - b.y);
@@ -894,6 +899,18 @@ vec3 suitAlbedo(vec2 p, float strand) {
   float line = max((1.0 - smoothstep(w, w + 1.1 * px, dRay)) * smoothstep(3.0, 7.0, r),
                    (1.0 - smoothstep(w, w + 1.1 * px, dRing)) * smoothstep(4.0, 8.0, r));
   line *= smoothstep(0.8, 2.6, u) * mix(0.35, 1.0, smoothstep(7.0, 13.0, abs(q.y)));
+  return line;
+}
+
+float labelInk(vec2 uv) {
+  if (uv.x <= 0.0 || uv.y <= 0.0 || uv.x >= 1.0 || uv.y >= 1.0) return 0.0;
+  return textureLod(uLabel, uv, uLabelLod).a * uLabelAmt;
+}
+
+vec3 suitAlbedo(vec2 p, float strand) {
+  vec2 q = p - uBtnP.xy, b = uBtnP.zw;
+  float u = -(length(vec2(max(abs(q.x) - (b.x - b.y), 0.0), q.y)) - b.y);
+  float line = suitWeb(p);
   vec2 suitUV = q / max(b, vec2(1.0));
   float redScale = 1.0 + uPulse.x * sin(uTime * uPulse.y);
   float panelPosition = (abs(suitUV.x) + 0.08 * suitUV.y * suitUV.y) / redScale;
@@ -973,7 +990,7 @@ vec3 shadeGoo(vec2 p, vec4 g) {
   if (uLabelAmt > 0.0) {
     vec2 lu = (p - uLabelBox.xy) / (2.0 * uLabelBox.zw) + 0.5;
     if (lu.x > 0.0 && lu.y > 0.0 && lu.x < 1.0 && lu.y < 1.0) {
-      float m = textureLod(uLabel, lu, uLabelLod).a * (1.0 - smoothstep(0.15, 0.5, strandness)) * uLabelAmt;
+      float m = labelInk(lu) * (1.0 - smoothstep(0.15, 0.5, strandness));
       if (m > 0.002) col = mix(col, shadeLabel(lu, sh, ao), m);
     }
   }
@@ -1043,7 +1060,7 @@ float floorShadow(vec2 p) {
   float d0 = 1.3 * KEY.z, a0 = 1.2;
   float full = 0.865 * (d0 + a0);
   float lit = 0.865 * (d0 * sh + a0 * ao) * (1.0 - buttonShadow(p) * 0.95);
-  return clamp(1.0 - toSRGB(vec3(lit)).x / toSRGB(vec3(full)).x, 0.0, 1.0);
+  return clamp(1.0 - toSRGB(vec3(lit)).x / toSRGB(vec3(full)).x, 0.0, 1.0) * mix(1.0, uHoverEdge.w, uHoverProgress);
 }
 
 void main() {
@@ -1066,6 +1083,34 @@ void main() {
     }
   } else {
     res = vec4(toSRGB(shadeAny(p, g)), 1.0);
+  }
+  // Camouflage opens from multiple noisy edges, revealing the page through the whole body.
+  // Its original web/label masks stay as faint blue traces; external silk stays solid.
+  if (uHoverProgress > 0.001 && g.w >= 0.5 && g.w < 1.5) {
+    vec2 q = p - uBtnP.xy;
+    float surface = sdPill(q, uBtnP.zw);
+    float body = (1.0 - smoothstep(0.05, 0.4, g.w - 1.0)) * (1.0 - smoothstep(-0.5, 0.5, surface));
+    vec2 drift = vec2(uTime * 0.18, -uTime * 0.12);
+    float noise = vn(q * 0.075 + drift) * 0.7 + vn(q * 0.21 - drift) * 0.3;
+    float field = -surface + (noise - 0.5) * uHoverStyle.w * 2.0;
+    float front = mix(-uHoverStyle.w * 2.0, uBtnP.w + uHoverStyle.w * 2.0, uHoverProgress);
+    float distance = field - front;
+    float fill = (1.0 - smoothstep(-uHoverStyle.y, uHoverStyle.y, distance)) * body;
+    float rim = (1.0 - smoothstep(uHoverStyle.z, uHoverStyle.z + 1.5 / uDpr, abs(distance))) * body;
+    float web = suitWeb(p);
+    float lettering = labelInk((p - uLabelBox.xy) / (2.0 * uLabelBox.zw) + 0.5);
+    float halfWidth = uHoverEdge.x * 0.5;
+    float outline = 1.0 - smoothstep(halfWidth - 0.5 / uDpr, halfWidth + 0.5 / uDpr, abs(surface + halfWidth));
+    float innerGlow = exp(-max(-surface - uHoverEdge.x, 0.0) / max(uHoverEdge.y, 0.01)) * uHoverEdge.z;
+    float alpha = max(innerGlow, max(uHoverStyle.x, max(web * uHoverInk.x, max(lettering * uHoverInk.y, outline * uHoverInk.z))));
+    vec3 color = toSRGB(uHoverColor);
+    res = mix(res, vec4(color * alpha, alpha), fill);
+    // Sparse broken contours remain visible inside the clear silhouette, like refracted edges.
+    float contour = (noise - 0.5) * uHoverStyle.w * 2.0;
+    float fragments = smoothstep(0.56, 0.7, vn(q * 0.045 - drift));
+    float seams = (1.0 - smoothstep(uHoverStyle.z, uHoverStyle.z + 1.0 / uDpr, abs(contour))) * fragments;
+    float gleam = max(rim, seams * fill * smoothstep(0.65, 0.95, uHoverProgress)) * body;
+    res = mix(res, vec4(toSRGB(uHoverEdgeColor) * uHoverInk.w, uHoverInk.w), gleam);
   }
   res.rgb += (hash12(gl_FragCoord.xy + fract(uTime) * 61.0) - 0.5) / 255.0 * res.a;
   outC = vec4(clamp(res.rgb, 0.0, res.a), res.a);
@@ -1093,7 +1138,7 @@ function program(fs, names) {
   return { prog, u };
 }
 const p1 = program(FRAG_SCENE, ['uArrowSDF', 'uMorph', 'uCoat', 'uNC', 'uCoil', 'uCBox', 'uHandSDF', 'uHand', 'uHand2', 'uRes', 'uDpr', 'uTime', 'uBtn', 'uBtnZ', 'uBtnZ2', 'uPull', 'uPeak', 'uNS', 'uPts', 'uBox', 'uAnc', 'uAncD', 'uNBr', 'uBr', 'uNB', 'uBlob', 'uBlobZ', 'uRip', 'uLabel', 'uLabelBox', 'uEmboss', 'uZTop', 'uK', 'uShock']);
-const p2 = program(FRAG_SHADE, ['uG', 'uLabel', 'uRes', 'uDpr', 'uTime', 'uLabelBox', 'uLabelAmt', 'uLabelLod', 'uIri', 'uZMax', 'uLift', 'uBtnP', 'uWin', 'uBtnH', 'uHandCol', 'uArrowCol', 'uMorph', 'uHand', 'uHand2', 'uTheme', 'uInfect', 'uSuitBase', 'uSuitAccent', 'uWebBase', 'uWebAccent', 'uStrandColor', 'uWebStrength', 'uWebWidth', 'uPanel', 'uPulse', 'uLabelColor', 'uIconColor', 'uIconEdge', 'uLabelPolish']);
+const p2 = program(FRAG_SHADE, ['uG', 'uLabel', 'uRes', 'uDpr', 'uTime', 'uLabelBox', 'uLabelAmt', 'uLabelLod', 'uIri', 'uZMax', 'uLift', 'uBtnP', 'uWin', 'uBtnH', 'uHandCol', 'uArrowCol', 'uMorph', 'uHand', 'uHand2', 'uTheme', 'uInfect', 'uSuitBase', 'uSuitAccent', 'uWebBase', 'uWebAccent', 'uStrandColor', 'uWebStrength', 'uWebWidth', 'uPanel', 'uPulse', 'uLabelColor', 'uIconColor', 'uIconEdge', 'uLabelPolish', 'uHoverProgress', 'uHoverStyle', 'uHoverInk', 'uHoverEdge', 'uHoverColor', 'uHoverEdgeColor']);
 
 // ── icon textures (arrow + hand): colour (for shading) + signed distance field (for the 3D slab)
 const handColTex = gl.createTexture(), handSdfTex = gl.createTexture();
@@ -1443,7 +1488,7 @@ function outlineAt(t, g) {
 let lastProbeT = Math.random();
 const shotQueue = [];
 const infect = { amt: 0, target: 0, dx: 1, dy: 0, purging: false };
-let shockUntil = 0, shockAmt = 0;
+let shockUntil = 0, shockAmt = 0, hoverAmt = 0;
 function spawnShot(g, q) {
   if (strands.length >= MAXS - 1) return;
   const far = pillEdge(g.cx + Math.cos(q.a) * 600, g.cy + Math.sin(q.a) * 600, g);
@@ -2062,6 +2107,10 @@ function render() {
   gl.uniform3fv(u2.uLabelColor, cfg.labelColor);
   gl.uniform3fv(u2.uIconColor, cfg.iconColor);
   gl.uniform1f(u2.uIconEdge, iconEdge);
+  gl.uniform1f(u2.uHoverProgress, hoverAmt);
+  gl.uniform4f(u2.uHoverStyle, cfg.hover?.opacity ?? 1, cfg.hover?.feather || 0, cfg.hover?.rimWidth || 0, cfg.hover?.warp || 0);
+  gl.uniform4f(u2.uHoverInk, cfg.hover?.webOpacity || 0, cfg.hover?.labelOpacity || 0, cfg.hover?.outlineOpacity || 0, cfg.hover?.boundaryOpacity || 0);
+  gl.uniform4f(u2.uHoverEdge, cfg.hover?.outlineWidth || 0, cfg.hover?.innerWidth || 0, cfg.hover?.innerOpacity || 0, cfg.hover?.shadowOpacity ?? 1);
   gl.drawArrays(gl.TRIANGLES, 0, 3);
 
   // pass 3: FXAA to the screen
@@ -2120,13 +2169,15 @@ function frame(now) {
   cfg.tick?.(api);
   refreshTrackedWebs();
   shockAmt += ((now < shockUntil ? 1 : 0) - shockAmt) * (1 - Math.exp(-dt * 12));
+  const hoverTarget = cfg.hover && cur.real && cur.present && cur.mouse && pillEdge(cur.x, cur.y, geo()).d <= 0 ? 1 : 0;
+  hoverAmt += (hoverTarget - hoverAmt) * (1 - Math.exp(-dt * (cfg.hover?.fadeSpeed || 1)));
   while (acc >= SUB && n < 40) { step(SUB); acc -= SUB; n++; }
   if (n === 40) acc = 0;
   // the OS cursor hides while the rendered 3D hand stands in for it
   if (hand.on !== api.engaged) { api.engaged = hand.on; cfg.onEngage?.(); }
   // Animated materials keep a smooth idle cadence; static suits only need a slow glint.
   const busy = strands.length || crawlers.length || ripples.length || cur.present || hand.on || shotQueue.length ||
-    btn.intro < 0.999 || labelAmt < 0.999 || shockAmt > 0.002 || Math.abs(btn.liftV) + Math.abs(btn.pressV) + Math.abs(btn.sxV) + Math.abs(btn.syV) > 0.02 ||
+    btn.intro < 0.999 || labelAmt < 0.999 || hoverAmt > 0.002 || shockAmt > 0.002 || Math.abs(btn.liftV) + Math.abs(btn.pressV) + Math.abs(btn.sxV) + Math.abs(btn.syV) > 0.02 ||
     Math.abs(infect.target - infect.amt) > 0.002 || btn.lift > 0.002;
   const idleStride = cfg.suit?.panel && cfg.suit.pulse.amount && !reduced ? 2 : 6;
   if (busy || ++idleFrames % idleStride === 0) render();

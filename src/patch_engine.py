@@ -9,7 +9,7 @@ def rep(old, new, count=1):
 rep("'use strict';\n(() => {", """'use strict';
 function createGoo(cfg) {
 const suit = cfg.suit, zeroColor = [0, 0, 0];
-const materialColors = [['uSuitBase', suit?.base], ['uSuitAccent', suit?.accent], ['uWebBase', suit?.web], ['uWebAccent', suit?.webAccent], ['uStrandColor', suit?.strand]].map(([key, value]) => [key, value || zeroColor]);""")
+const materialColors = [['uSuitBase', suit?.base], ['uSuitAccent', suit?.accent], ['uWebBase', suit?.web], ['uWebAccent', suit?.webAccent], ['uStrandColor', suit?.strand], ['uHoverColor', cfg.hover?.color], ['uHoverEdgeColor', cfg.hover?.edgeColor]].map(([key, value]) => [key, value || zeroColor]);""")
 rep("const DEFAULTS = { ...P };", "Object.assign(P, cfg.params || {});\nconst DEFAULTS = { ...P };")
 rep("const VIEW_SCALE = Math.min(4, Math.max(1, Number(new URLSearchParams(location.search).get('scale')) || 1));\nconst viewW = () => innerWidth / VIEW_SCALE, viewH = () => innerHeight / VIEW_SCALE;",
     "const VIEW_SCALE = 1;\nlet CW = 400, CH = 300;\nconst PAD = cfg.pad || 200;\nconst viewW = () => CW, viewH = () => CH;")
@@ -29,8 +29,8 @@ rep("""  document.body.classList.add('no-gl');
   return;
 }
 document.body.classList.add('has-gl');""", "  document.body.classList.add('no-gl');\n  return null;\n}\ndocument.body.classList.add('has-gl');")
-SUIT_UNIFORMS = ['uTheme', 'uInfect', 'uSuitBase', 'uSuitAccent', 'uWebBase', 'uWebAccent', 'uStrandColor', 'uWebStrength', 'uWebWidth', 'uPanel', 'uPulse', 'uLabelColor', 'uIconColor', 'uIconEdge', 'uLabelPolish']
-rep("uniform vec4 uHand2;\nout vec4 outC;\n\nvec3 KEY;", "uniform vec4 uHand2;\nuniform float uTheme, uWebStrength, uWebWidth, uPanel, uIconEdge, uLabelPolish;\nuniform vec2 uPulse;\nuniform vec3 uSuitBase, uSuitAccent, uWebBase, uWebAccent, uStrandColor, uLabelColor, uIconColor;\nuniform vec4 uInfect;\nout vec4 outC;\n\nvec3 KEY;")
+SUIT_UNIFORMS = ['uTheme', 'uInfect', 'uSuitBase', 'uSuitAccent', 'uWebBase', 'uWebAccent', 'uStrandColor', 'uWebStrength', 'uWebWidth', 'uPanel', 'uPulse', 'uLabelColor', 'uIconColor', 'uIconEdge', 'uLabelPolish', 'uHoverProgress', 'uHoverStyle', 'uHoverInk', 'uHoverEdge', 'uHoverColor', 'uHoverEdgeColor']
+rep("uniform vec4 uHand2;\nout vec4 outC;\n\nvec3 KEY;", "uniform vec4 uHand2;\nuniform float uTheme, uWebStrength, uWebWidth, uPanel, uIconEdge, uLabelPolish, uHoverProgress;\nuniform vec2 uPulse;\nuniform vec4 uHoverEdge;\nuniform vec3 uSuitBase, uSuitAccent, uWebBase, uWebAccent, uStrandColor, uLabelColor, uIconColor, uHoverColor, uHoverEdgeColor;\nuniform vec4 uInfect, uHoverStyle, uHoverInk;\nout vec4 outC;\n\nvec3 KEY;")
 # The existing liquid SDF also renders the magnetic-fluid response to electricity.
 rep('uniform float uTime;\nuniform int uNC;', 'uniform float uTime;\nuniform vec3 uShock;\nuniform int uNC;')
 rep("  if (d > 110.0) return vec2(d, 0.0);", """  float shockAngle = atan(q.y / uBtn.w, q.x / uBtn.z);
@@ -47,7 +47,7 @@ rep('  const lb = [g.cx, g.cy + LABEL_NUDGE, btn.lbw, btn.lbh];', '  zTop += sho
 SUIT = r'''
 // Spidey's suit: the original red centre panel gently breathes between blue sides.
 // uInfect: the symbiote takes the suit over from the side facing Venom while they fight
-vec3 suitAlbedo(vec2 p, float strand) {
+float suitWeb(vec2 p) {
   vec2 q = p - uBtnP.xy, b = uBtnP.zw;
   float a = b.x - b.y;
   float u = -(length(vec2(max(abs(q.x) - a, 0.0), q.y)) - b.y);
@@ -63,6 +63,18 @@ vec3 suitAlbedo(vec2 p, float strand) {
   float line = max((1.0 - smoothstep(w, w + 1.1 * px, dRay)) * smoothstep(3.0, 7.0, r),
                    (1.0 - smoothstep(w, w + 1.1 * px, dRing)) * smoothstep(4.0, 8.0, r));
   line *= smoothstep(0.8, 2.6, u) * mix(0.35, 1.0, smoothstep(7.0, 13.0, abs(q.y)));
+  return line;
+}
+
+float labelInk(vec2 uv) {
+  if (uv.x <= 0.0 || uv.y <= 0.0 || uv.x >= 1.0 || uv.y >= 1.0) return 0.0;
+  return textureLod(uLabel, uv, uLabelLod).a * uLabelAmt;
+}
+
+vec3 suitAlbedo(vec2 p, float strand) {
+  vec2 q = p - uBtnP.xy, b = uBtnP.zw;
+  float u = -(length(vec2(max(abs(q.x) - (b.x - b.y), 0.0), q.y)) - b.y);
+  float line = suitWeb(p);
   vec2 suitUV = q / max(b, vec2(1.0));
   float redScale = 1.0 + uPulse.x * sin(uTime * uPulse.y);
   float panelPosition = (abs(suitUV.x) + 0.08 * suitUV.y * suitUV.y) / redScale;
@@ -81,6 +93,7 @@ vec3 suitAlbedo(vec2 p, float strand) {
 
 vec3 shadeGoo(vec2 p, vec4 g) {'''
 rep("\nvec3 shadeGoo(vec2 p, vec4 g) {", SUIT)
+rep('textureLod(uLabel, lu, uLabelLod).a * (1.0 - smoothstep(0.15, 0.5, strandness)) * uLabelAmt', 'labelInk(lu) * (1.0 - smoothstep(0.15, 0.5, strandness))')
 rep("""  vec3 diff = vec3(0.0007) * (1.8 * max(dot(N, KEY), 0.0) * sh + 0.9 * ao);
   vec3 col = diff + spec;""", """  vec3 diff = vec3(0.0007) * (1.8 * max(dot(N, KEY), 0.0) * sh + 0.9 * ao);
   if (uTheme > 0.5) {
@@ -101,7 +114,7 @@ float floorShadow(vec2 p) {
   float d0 = 1.3 * KEY.z, a0 = 1.2;
   float full = 0.865 * (d0 + a0);
   float lit = 0.865 * (d0 * sh + a0 * ao) * (1.0 - buttonShadow(p) * 0.95);
-  return clamp(1.0 - toSRGB(vec3(lit)).x / toSRGB(vec3(full)).x, 0.0, 1.0);
+  return clamp(1.0 - toSRGB(vec3(lit)).x / toSRGB(vec3(full)).x, 0.0, 1.0) * mix(1.0, uHoverEdge.w, uHoverProgress);
 }
 
 void main() {
@@ -124,6 +137,34 @@ void main() {
     }
   } else {
     res = vec4(toSRGB(shadeAny(p, g)), 1.0);
+  }
+  // Camouflage opens from multiple noisy edges, revealing the page through the whole body.
+  // Its original web/label masks stay as faint blue traces; external silk stays solid.
+  if (uHoverProgress > 0.001 && g.w >= 0.5 && g.w < 1.5) {
+    vec2 q = p - uBtnP.xy;
+    float surface = sdPill(q, uBtnP.zw);
+    float body = (1.0 - smoothstep(0.05, 0.4, g.w - 1.0)) * (1.0 - smoothstep(-0.5, 0.5, surface));
+    vec2 drift = vec2(uTime * 0.18, -uTime * 0.12);
+    float noise = vn(q * 0.075 + drift) * 0.7 + vn(q * 0.21 - drift) * 0.3;
+    float field = -surface + (noise - 0.5) * uHoverStyle.w * 2.0;
+    float front = mix(-uHoverStyle.w * 2.0, uBtnP.w + uHoverStyle.w * 2.0, uHoverProgress);
+    float distance = field - front;
+    float fill = (1.0 - smoothstep(-uHoverStyle.y, uHoverStyle.y, distance)) * body;
+    float rim = (1.0 - smoothstep(uHoverStyle.z, uHoverStyle.z + 1.5 / uDpr, abs(distance))) * body;
+    float web = suitWeb(p);
+    float lettering = labelInk((p - uLabelBox.xy) / (2.0 * uLabelBox.zw) + 0.5);
+    float halfWidth = uHoverEdge.x * 0.5;
+    float outline = 1.0 - smoothstep(halfWidth - 0.5 / uDpr, halfWidth + 0.5 / uDpr, abs(surface + halfWidth));
+    float innerGlow = exp(-max(-surface - uHoverEdge.x, 0.0) / max(uHoverEdge.y, 0.01)) * uHoverEdge.z;
+    float alpha = max(innerGlow, max(uHoverStyle.x, max(web * uHoverInk.x, max(lettering * uHoverInk.y, outline * uHoverInk.z))));
+    vec3 color = toSRGB(uHoverColor);
+    res = mix(res, vec4(color * alpha, alpha), fill);
+    // Sparse broken contours remain visible inside the clear silhouette, like refracted edges.
+    float contour = (noise - 0.5) * uHoverStyle.w * 2.0;
+    float fragments = smoothstep(0.56, 0.7, vn(q * 0.045 - drift));
+    float seams = (1.0 - smoothstep(uHoverStyle.z, uHoverStyle.z + 1.0 / uDpr, abs(contour))) * fragments;
+    float gleam = max(rim, seams * fill * smoothstep(0.65, 0.95, uHoverProgress)) * body;
+    res = mix(res, vec4(toSRGB(uHoverEdgeColor) * uHoverInk.w, uHoverInk.w), gleam);
   }
   res.rgb += (hash12(gl_FragCoord.xy + fract(uTime) * 61.0) - 0.5) / 255.0 * res.a;
   outC = vec4(clamp(res.rgb, 0.0, res.a), res.a);
@@ -257,7 +298,7 @@ resize();
 '''
 rep(LAY_OLD, LAY_NEW)
 rep("  while (acc >= SUB && n < 40 && !window.VenomButton?._debug.paused) { step(SUB); acc -= SUB; n++; }",
-    "  cfg.tick?.(api);\n  refreshTrackedWebs();\n  shockAmt += ((now < shockUntil ? 1 : 0) - shockAmt) * (1 - Math.exp(-dt * 12));\n  while (acc >= SUB && n < 40) { step(SUB); acc -= SUB; n++; }")
+    "  cfg.tick?.(api);\n  refreshTrackedWebs();\n  shockAmt += ((now < shockUntil ? 1 : 0) - shockAmt) * (1 - Math.exp(-dt * 12));\n  const hoverTarget = cfg.hover && cur.real && cur.present && cur.mouse && pillEdge(cur.x, cur.y, geo()).d <= 0 ? 1 : 0;\n  hoverAmt += (hoverTarget - hoverAmt) * (1 - Math.exp(-dt * (cfg.hover?.fadeSpeed || 1)));\n  while (acc >= SUB && n < 40) { step(SUB); acc -= SUB; n++; }")
 rep("  if (hand.on !== document.body.classList.contains('is-engaged')) document.body.classList.toggle('is-engaged', hand.on);",
     "  if (hand.on !== api.engaged) { api.engaged = hand.on; cfg.onEngage?.(); }")
 rep("  if (slowFor > 2 && quality > 0.8) { quality -= 0.1; slowFor = 0; resize(); }", "  if (slowFor > 1.2 && quality > 0.55) { quality -= 0.1; slowFor = 0; alloc(); }")
@@ -319,7 +360,7 @@ rep(INP_OLD, INP_NEW)
 # tap: real strands shot out in random directions; fight infection state
 rep("function spawnProbe(g) {", """const shotQueue = [];
 const infect = { amt: 0, target: 0, dx: 1, dy: 0, purging: false };
-let shockUntil = 0, shockAmt = 0;
+let shockUntil = 0, shockAmt = 0, hoverAmt = 0;
 function spawnShot(g, q) {
   if (strands.length >= MAXS - 1) return;
   const far = pillEdge(g.cx + Math.cos(q.a) * 600, g.cy + Math.sin(q.a) * 600, g);
@@ -360,6 +401,10 @@ rep("  gl.uniform1f(u2.uMorph, hand.m);\n", """  gl.uniform1f(u2.uMorph, hand.m)
   gl.uniform3fv(u2.uLabelColor, cfg.labelColor);
   gl.uniform3fv(u2.uIconColor, cfg.iconColor);
   gl.uniform1f(u2.uIconEdge, iconEdge);
+  gl.uniform1f(u2.uHoverProgress, hoverAmt);
+  gl.uniform4f(u2.uHoverStyle, cfg.hover?.opacity ?? 1, cfg.hover?.feather || 0, cfg.hover?.rimWidth || 0, cfg.hover?.warp || 0);
+  gl.uniform4f(u2.uHoverInk, cfg.hover?.webOpacity || 0, cfg.hover?.labelOpacity || 0, cfg.hover?.outlineOpacity || 0, cfg.hover?.boundaryOpacity || 0);
+  gl.uniform4f(u2.uHoverEdge, cfg.hover?.outlineWidth || 0, cfg.hover?.innerWidth || 0, cfg.hover?.innerOpacity || 0, cfg.hover?.shadowOpacity ?? 1);
 """)
 rep("  fling(vx, vy) {", """  shootAt(px, py, track = null) {
     const [x, y] = toLocal(px, py), g = geo(), anchor = pillEdge(x, y, g);
@@ -382,6 +427,7 @@ rep("  fling(vx, vy) {", """  shootAt(px, py, track = null) {
   fling(vx, vy) {""")
 rep("  render();\n  // adaptive resolution if the GPU struggles\n  if (frameEma > 1 / 40 &&",
     "  // Animated materials keep a smooth idle cadence; static suits only need a slow glint.\n  const busy = strands.length || crawlers.length || ripples.length || cur.present || hand.on || shotQueue.length ||\n    btn.intro < 0.999 || labelAmt < 0.999 || shockAmt > 0.002 || Math.abs(btn.liftV) + Math.abs(btn.pressV) + Math.abs(btn.sxV) + Math.abs(btn.syV) > 0.02 ||\n    Math.abs(infect.target - infect.amt) > 0.002 || btn.lift > 0.002;\n  const idleStride = cfg.suit?.panel && cfg.suit.pulse.amount && !reduced ? 2 : 6;\n  if (busy || ++idleFrames % idleStride === 0) render();\n  // adaptive resolution if the GPU struggles\n  if (busy && frameEma > 1 / 50 &&")
+rep("labelAmt < 0.999 || shockAmt > 0.002 ||", "labelAmt < 0.999 || hoverAmt > 0.002 || shockAmt > 0.002 ||")
 rep("let last = performance.now(), acc = 0,", "let idleFrames = 0;\nlet last = performance.now(), acc = 0,")
 open('engine.js', 'w', encoding='utf-8', newline='').write(src)
 print('ok', len(src))
