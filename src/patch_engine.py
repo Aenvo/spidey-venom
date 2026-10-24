@@ -6,7 +6,10 @@ def rep(old, new, count=1):
     assert n == count, (old[:80], n)
     src = src.replace(old, new)
 
-rep("'use strict';\n(() => {", "'use strict';\nfunction createGoo(cfg) {")
+rep("'use strict';\n(() => {", """'use strict';
+function createGoo(cfg) {
+const suit = cfg.suit, zeroColor = [0, 0, 0];
+const materialColors = [['uSuitBase', suit?.base], ['uSuitAccent', suit?.accent], ['uWebBase', suit?.web], ['uWebAccent', suit?.webAccent], ['uStrandColor', suit?.strand]].map(([key, value]) => [key, value || zeroColor]);""")
 rep("const DEFAULTS = { ...P };", "Object.assign(P, cfg.params || {});\nconst DEFAULTS = { ...P };")
 rep("const VIEW_SCALE = Math.min(4, Math.max(1, Number(new URLSearchParams(location.search).get('scale')) || 1));\nconst viewW = () => innerWidth / VIEW_SCALE, viewH = () => innerHeight / VIEW_SCALE;",
     "const VIEW_SCALE = 1;\nlet CW = 400, CH = 300;\nconst PAD = cfg.pad || 200;\nconst viewW = () => CW, viewH = () => CH;")
@@ -26,7 +29,20 @@ rep("""  document.body.classList.add('no-gl');
   return;
 }
 document.body.classList.add('has-gl');""", "  document.body.classList.add('no-gl');\n  return null;\n}\ndocument.body.classList.add('has-gl');")
-rep("uniform vec4 uHand2;\nout vec4 outC;\n\nvec3 KEY;", "uniform vec4 uHand2;\nuniform float uTheme;\nuniform vec4 uInfect;\nout vec4 outC;\n\nvec3 KEY;")
+SUIT_UNIFORMS = ['uTheme', 'uInfect', 'uSuitBase', 'uSuitAccent', 'uWebBase', 'uWebAccent', 'uStrandColor', 'uWebStrength', 'uWebWidth', 'uPanel', 'uPulse', 'uLabelColor', 'uIconColor', 'uIconEdge', 'uLabelPolish']
+rep("uniform vec4 uHand2;\nout vec4 outC;\n\nvec3 KEY;", "uniform vec4 uHand2;\nuniform float uTheme, uWebStrength, uWebWidth, uPanel, uIconEdge, uLabelPolish;\nuniform vec2 uPulse;\nuniform vec3 uSuitBase, uSuitAccent, uWebBase, uWebAccent, uStrandColor, uLabelColor, uIconColor;\nuniform vec4 uInfect;\nout vec4 outC;\n\nvec3 KEY;")
+# The existing liquid SDF also renders the magnetic-fluid response to electricity.
+rep('uniform float uTime;\nuniform int uNC;', 'uniform float uTime;\nuniform vec3 uShock;\nuniform int uNC;')
+rep("  if (d > 110.0) return vec2(d, 0.0);", """  float shockAngle = atan(q.y / uBtn.w, q.x / uBtn.z);
+  float spikePhase = shockAngle * uShock.z + 2.0 * sin(uTime * 2.4 + shockAngle * 7.0) + 1.2 * sin(shockAngle * 13.0 - uTime * 1.7);
+  float spike = pow(max(0.0, cos(spikePhase)), 12.0);
+  float spikePulse = 0.25 + 0.75 * vnoise(vec2(shockAngle * 7.0 + uTime * 0.8, uTime * 1.3));
+  d -= uShock.x * uShock.y * spike * spikePulse;
+  if (d > 110.0) return vec2(d, 0.0);""")
+rep('  disp += lift * body;', '  lift += uShock.x * uShock.y * 0.65 * pow(max(0.0, sin(q.x * 0.35 + uTime * 2.6) * cos(q.y * 0.42 - uTime * 1.8)), 8.0);\n  disp += lift * body;')
+rep("'uZTop', 'uK']);", "'uZTop', 'uK', 'uShock']);")
+rep('  gl.uniform1f(u1.uTime, time2);', '  gl.uniform1f(u1.uTime, time2);\n  gl.uniform3f(u1.uShock, shockAmt, cfg.shockResponse?.height || 0, cfg.shockResponse?.count || 0);')
+rep('  const lb = [g.cx, g.cy + LABEL_NUDGE, btn.lbw, btn.lbh];', '  zTop += shockAmt * (cfg.shockResponse?.height || 0);\n  const lb = [g.cx, g.cy + LABEL_NUDGE, btn.lbw, btn.lbh];')
 
 SUIT = r'''
 // Spidey's suit: the original red centre panel gently breathes between blue sides.
@@ -43,23 +59,23 @@ vec3 suitAlbedo(vec2 p, float strand) {
   float dRay = min(fs, 1.0 - fs) * 6.28318 / 14.0 * r;
   float rc = (r + 2.4 * sin(3.14159 * fs)) / 7.5;
   float dRing = abs(fract(rc + 0.5) - 0.5) * 7.5;
-  float w = 0.3;
+  float w = uWebWidth;
   float line = max((1.0 - smoothstep(w, w + 1.1 * px, dRay)) * smoothstep(3.0, 7.0, r),
                    (1.0 - smoothstep(w, w + 1.1 * px, dRing)) * smoothstep(4.0, 8.0, r));
   line *= smoothstep(0.8, 2.6, u) * mix(0.35, 1.0, smoothstep(7.0, 13.0, abs(q.y)));
   vec2 suitUV = q / max(b, vec2(1.0));
-  float redScale = 1.0 + 0.1 * sin(uTime * 1.1);
+  float redScale = 1.0 + uPulse.x * sin(uTime * uPulse.y);
   float panelPosition = (abs(suitUV.x) + 0.08 * suitUV.y * suitUV.y) / redScale;
-  float redMask = 1.0 - smoothstep(0.5, 0.62, panelPosition);
-  vec3 alb = mix(vec3(0.018, 0.085, 0.52), vec3(0.58, 0.012, 0.022), redMask);
+  float redMask = (1.0 - smoothstep(0.5, 0.62, panelPosition)) * uPanel;
+  vec3 alb = mix(uSuitBase, uSuitAccent, redMask);
   alb *= 0.9 + 0.1 * smoothstep(0.0, b.y, u);
-  vec3 webInk = mix(vec3(0.004, 0.012, 0.07), vec3(0.07, 0.002, 0.006), redMask);
-  alb = mix(alb, webInk, line * 0.75);
+  vec3 webInk = mix(uWebBase, uWebAccent, redMask);
+  alb = mix(alb, webInk, line * uWebStrength);
   float sF = dot(q, uInfect.xy) / b.x;
   float front = 1.0 - 2.5 * uInfect.z + 0.4 * (vn(p * 0.08 + vec2(uTime * 0.25, -uTime * 0.18)) - 0.5);
   float inf = smoothstep(front - 0.07, front + 0.07, sF) * step(0.003, uInfect.z);
   alb = mix(alb, vec3(0.0007), inf);
-  vec3 silk = mix(vec3(0.8, 0.81, 0.84), vec3(0.0007), smoothstep(0.35, 0.85, uInfect.z));
+  vec3 silk = mix(uStrandColor, vec3(0.0007), smoothstep(0.35, 0.85, uInfect.z));
   return mix(alb, silk, smoothstep(0.1, 0.6, strand));
 }
 
@@ -113,9 +129,9 @@ void main() {
   outC = vec4(clamp(res.rgb, 0.0, res.a), res.a);
 '''
 rep(MAIN_OLD, MAIN_NEW)
-rep('  vec3 silver = vec3(0.9, 0.91, 0.94);\n', '  float dk = uTheme > 0.5 ? 1.0 - smoothstep(0.55, 0.95, uInfect.z) : 0.0;\n  vec3 silver = mix(vec3(0.9, 0.91, 0.94), vec3(0.012, 0.012, 0.016), dk);\n')
-rep('  col += vec3(1.0) * 0.55 * edge * smoothstep(0.1, 0.9, facing);\n', '  col += vec3(1.0) * mix(0.55, 0.06, dk) * edge * smoothstep(0.1, 0.9, facing);\n')
-rep("'uHandCol', 'uArrowCol', 'uMorph', 'uHand', 'uHand2']);", "'uHandCol', 'uArrowCol', 'uMorph', 'uHand', 'uHand2', 'uTheme', 'uInfect']);")
+rep('  vec3 silver = vec3(0.9, 0.91, 0.94);\n', '  vec3 silver = lu.x < uIconEdge ? uIconColor : uLabelColor;\n  silver = mix(silver, vec3(0.9, 0.91, 0.94), smoothstep(0.55, 0.95, uInfect.z));\n  float dk = 1.0 - smoothstep(0.05, 0.5, max(silver.r, max(silver.g, silver.b)));\n')
+rep('  col += vec3(1.0) * 0.55 * edge * smoothstep(0.1, 0.9, facing);\n', '  col += vec3(1.0) * mix(0.06, mix(0.55, 0.06, dk), uLabelPolish) * edge * smoothstep(0.1, 0.9, facing);\n')
+rep("'uHandCol', 'uArrowCol', 'uMorph', 'uHand', 'uHand2']);", "'uHandCol', 'uArrowCol', 'uMorph', 'uHand', 'uHand2', " + ', '.join(repr(u) for u in SUIT_UNIFORMS) + "]);")
 
 FX_OLD = src[src.index("float luma(vec3 c)"):src.index("}`;", src.index("float luma(vec3 c)"))]
 FX_NEW = r'''// premultiplied: edges are judged as if composited over paper, so dark goo on a clear background still gets smoothed
@@ -159,17 +175,19 @@ LBL_NEW = r'''function drawSpider(ctx, x, y, s, venom) {
 }
 async function setLabelText(text) {
   await fontReady;
-  const venom = cfg.theme !== 'spidey';
+  const venom = cfg.emblem === 'venom';
   lctx.clearRect(0, 0, LABEL_W, LABEL_H);
-  lctx.font = `700 ${LABEL_PX}px "Geist", system-ui, sans-serif`;
-  if ('letterSpacing' in lctx) lctx.letterSpacing = '10px';
+  const labelStyle = cfg.labelStyle;
+  lctx.font = `${labelStyle.weight} ${LABEL_PX}px "${labelStyle.font}", system-ui, sans-serif`;
+  if ('letterSpacing' in lctx) lctx.letterSpacing = `${labelStyle.letterSpacing}px`;
   lctx.fillStyle = 'white';
   lctx.textAlign = 'left';
   lctx.textBaseline = 'alphabetic';
   const m = lctx.measureText(text);
-  const tw = m.actualBoundingBoxLeft + m.actualBoundingBoxRight - ('letterSpacing' in lctx ? 10 : 0);
+  const tw = m.actualBoundingBoxLeft + m.actualBoundingBoxRight - ('letterSpacing' in lctx ? labelStyle.letterSpacing : 0);
   const es = venom ? 1.25 : 1.3, ew = (venom ? 108 : 76) * es, gap = 34;
   const total = ew + gap + tw, x0 = (LABEL_W - total) / 2;
+  iconEdge = (x0 + ew + gap / 2) / LABEL_W;
   const capH = m.actualBoundingBoxAscent;
   drawSpider(lctx, x0 + ew / 2, LABEL_H / 2 + (venom ? 0 : 2), es * (venom ? 0.95 : 1.0), venom);
   lctx.fillText(text, x0 + ew + gap + m.actualBoundingBoxLeft, LABEL_H / 2 + capH / 2);
@@ -181,6 +199,7 @@ async function setLabelText(text) {
 }
 '''
 rep(LBL_OLD, LBL_NEW)
+rep("let labelAmt = 0, labelTarget = 0;", "let iconEdge = 0, labelAmt = 0, labelTarget = 0;")
 
 rep("""    hw: btn.hh * 0.5 + (btn.hw - btn.hh * 0.5) * e + 2.5 * pr,
     hh: btn.hh * (0.55 + 0.45 * e) + 1 * pr,""", """    hw: btn.hh * 0.5 + (btn.hw - btn.hh * 0.5) * e + 2.5 * pr + btn.sx,
@@ -237,7 +256,7 @@ resize();
 '''
 rep(LAY_OLD, LAY_NEW)
 rep("  while (acc >= SUB && n < 40 && !window.VenomButton?._debug.paused) { step(SUB); acc -= SUB; n++; }",
-    "  cfg.tick?.(api);\n  while (acc >= SUB && n < 40) { step(SUB); acc -= SUB; n++; }")
+    "  cfg.tick?.(api);\n  shockAmt += ((now < shockUntil ? 1 : 0) - shockAmt) * (1 - Math.exp(-dt * 12));\n  while (acc >= SUB && n < 40) { step(SUB); acc -= SUB; n++; }")
 rep("  if (hand.on !== document.body.classList.contains('is-engaged')) document.body.classList.toggle('is-engaged', hand.on);",
     "  if (hand.on !== api.engaged) { api.engaged = hand.on; cfg.onEngage?.(); }")
 rep("  if (slowFor > 2 && quality > 0.8) { quality -= 0.1; slowFor = 0; resize(); }", "  if (slowFor > 1.2 && quality > 0.55) { quality -= 0.1; slowFor = 0; alloc(); }")
@@ -282,6 +301,13 @@ const api = {
   fling(vx, vy) { btn.dvx = vx / S; btn.dvy = vy / S; },
   size: () => ({ hw: btn.hw * S, hh: btn.hh * S }),
   setScale(s) { if (s === S) return; S = s; place(); alloc(); },
+  webPaths() {
+    return strands.filter(s => s.kind !== 'micro' && s.state !== 'recoil').map(s => {
+      const points = [];
+      for (let i = 0; i < NP; i++) points.push([(s.pos[i * 3] - CW / 2) * S + cfg.pos.x, (s.pos[i * 3 + 1] - CH / 2) * S + cfg.pos.y]);
+      return points;
+    });
+  },
 };
 requestAnimationFrame(frame);
 return api;
@@ -290,25 +316,43 @@ return api;
 rep(INP_OLD, INP_NEW)
 # tap: real strands shot out in random directions; fight infection state
 rep("function spawnProbe(g) {", """const shotQueue = [];
-const infect = { amt: 0, target: 0, dx: 1, dy: 0 };
+const infect = { amt: 0, target: 0, dx: 1, dy: 0, purging: false };
+let shockUntil = 0, shockAmt = 0;
 function spawnShot(g, q) {
   if (strands.length >= MAXS - 1) return;
   const far = pillEdge(g.cx + Math.cos(q.a) * 600, g.cy + Math.sin(q.a) * 600, g);
   const s = newStrand('shot', g, far.x, far.y);
   const dx = far.nx * Math.cos(q.spread) - far.ny * Math.sin(q.spread), dy = far.nx * Math.sin(q.spread) + far.ny * Math.cos(q.spread);
-  s.tgt = [far.x + dx * q.d, far.y + dy * q.d, q.z];
+  s.tgt = q.target || [far.x + dx * q.d, far.y + dy * q.d, q.z];
   s.ttl = q.ttl;
-  const rr = cfg.theme === 'spidey' ? 1.45 : 1.75;
+  const rr = cfg.shotRadius;
   s.vol = Math.PI * rr * rr * (q.d + 40);
   strands.push(s);
 }
 function spawnProbe(g) {""")
 rep("  for (let i = 0; i < strands.length; i++) stepStrand(strands[i], dt, g, present, inside);",
-    "  while (shotQueue.length && shotQueue[0].at <= time) spawnShot(g, shotQueue.shift());\n  infect.amt += (infect.target - infect.amt) * (1 - Math.exp(-dt * (infect.target > infect.amt ? 0.5 : 1.1)));\n  for (let i = 0; i < strands.length; i++) stepStrand(strands[i], dt, g, present, inside);")
+    "  while (shotQueue.length && shotQueue[0].at <= time) spawnShot(g, shotQueue.shift());\n  infect.amt += (infect.target - infect.amt) * (1 - Math.exp(-dt * (infect.purging ? cfg.purgeRate : infect.target > infect.amt ? 0.5 : 1.1)));\n  if (infect.purging && infect.amt < 0.002) { infect.amt = 0; infect.purging = false; }\n  for (let i = 0; i < strands.length; i++) stepStrand(strands[i], dt, g, present, inside);")
 rep("  } else if (s.kind === 'micro' && s.state !== 'recoil') {",
     "  } else if (s.kind === 'shot' && s.state !== 'recoil') {\n    T = s.tgt;\n    if (s.life > s.ttl) { s.state = 'recoil'; T = null; }\n  } else if (s.kind === 'micro' && s.state !== 'recoil') {")
-rep("  gl.uniform1f(u2.uMorph, hand.m);\n", "  gl.uniform1f(u2.uMorph, hand.m);\n  gl.uniform4f(u2.uInfect, infect.dx, infect.dy, infect.amt, 0);\n")
-rep("  fling(vx, vy) {", """  shoot() {
+rep("  gl.uniform1f(u2.uMorph, hand.m);\n", """  gl.uniform1f(u2.uMorph, hand.m);
+  gl.uniform4f(u2.uInfect, infect.dx, infect.dy, infect.amt, 0);
+  gl.uniform1f(u2.uTheme, suit ? 1 : 0);
+  gl.uniform1f(u2.uPanel, suit?.panel ? 1 : 0);
+  gl.uniform2f(u2.uPulse, suit?.pulse.amount || 0, suit?.pulse.speed || 0);
+  gl.uniform1f(u2.uWebStrength, suit?.webStrength || 0);
+  gl.uniform1f(u2.uWebWidth, suit?.webWidth || 0);
+  gl.uniform1f(u2.uLabelPolish, cfg.labelPolish ?? 1);
+  for (const [key, value] of materialColors) gl.uniform3fv(u2[key], value);
+  gl.uniform3fv(u2.uLabelColor, cfg.labelColor);
+  gl.uniform3fv(u2.uIconColor, cfg.iconColor);
+  gl.uniform1f(u2.uIconEdge, iconEdge);
+""")
+rep("  fling(vx, vy) {", """  shootAt(px, py) {
+    const [x, y] = toLocal(px, py), g = geo(), anchor = pillEdge(x, y, g);
+    spawnShot(g, { a: Math.atan2(y - g.cy, x - g.cx), spread: 0,
+      d: Math.hypot(x - anchor.x, y - anchor.y), z: 9, target: [x, y, 9], ttl: (cfg.electricity?.beamDuration || 1000) / 1000 });
+  },
+  shoot() {
     const n = 5 + Math.floor(Math.random() * 3), base = Math.random() * Math.PI * 2;
     let t = time;
     for (let i = 0; i < n; i++) {
@@ -316,10 +360,14 @@ rep("  fling(vx, vy) {", """  shoot() {
       shotQueue.push({ at: t, a: base + (i / n) * Math.PI * 2 + rand(-0.35, 0.35), d: rand(115, 205), spread: rand(-0.4, 0.4), z: rand(1, 3), ttl: rand(0.8, 1.3) });
     }
   },
-  setInfect(target, dx, dy) { infect.target = target; if (target > 0) { infect.dx = dx; infect.dy = dy; } },
+  setInfect(target, dx, dy) { infect.target = cfg.canBeInfected && !infect.purging ? target : 0; if (infect.target > 0) { infect.dx = dx; infect.dy = dy; } },
+  get infection() { return infect.amt; },
+  cleanse() { if (cfg.canBeInfected) { infect.target = 0; infect.purging = true; } },
+  shock(duration) { if (!cfg.shockResponse) return; shockUntil = Math.max(shockUntil, performance.now() + duration); releaseAll(false); },
+  stopShock() { shockUntil = 0; },
   fling(vx, vy) {""")
 rep("  render();\n  // adaptive resolution if the GPU struggles\n  if (frameEma > 1 / 40 &&",
-    "  // Keep Spidey's red patch pulsing while idle; Venom only needs its slow glint.\n  const busy = strands.length || crawlers.length || ripples.length || cur.present || hand.on || shotQueue.length ||\n    btn.intro < 0.999 || labelAmt < 0.999 || Math.abs(btn.liftV) + Math.abs(btn.pressV) + Math.abs(btn.sxV) + Math.abs(btn.syV) > 0.02 ||\n    Math.abs(infect.target - infect.amt) > 0.002 || btn.lift > 0.002;\n  const idleStride = cfg.theme === 'spidey' && !reduced ? 2 : 6;\n  if (busy || ++idleFrames % idleStride === 0) render();\n  // adaptive resolution if the GPU struggles\n  if (busy && frameEma > 1 / 50 &&")
+    "  // Animated materials keep a smooth idle cadence; static suits only need a slow glint.\n  const busy = strands.length || crawlers.length || ripples.length || cur.present || hand.on || shotQueue.length ||\n    btn.intro < 0.999 || labelAmt < 0.999 || shockAmt > 0.002 || Math.abs(btn.liftV) + Math.abs(btn.pressV) + Math.abs(btn.sxV) + Math.abs(btn.syV) > 0.02 ||\n    Math.abs(infect.target - infect.amt) > 0.002 || btn.lift > 0.002;\n  const idleStride = cfg.suit?.panel && cfg.suit.pulse.amount && !reduced ? 2 : 6;\n  if (busy || ++idleFrames % idleStride === 0) render();\n  // adaptive resolution if the GPU struggles\n  if (busy && frameEma > 1 / 50 &&")
 rep("let last = performance.now(), acc = 0,", "let idleFrames = 0;\nlet last = performance.now(), acc = 0,")
 open('engine.js', 'w', encoding='utf-8', newline='').write(src)
 print('ok', len(src))
