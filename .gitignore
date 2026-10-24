@@ -1,0 +1,6 @@
+shots/
+src/__pycache__/
+src/engine.js
+node_modules/
+.DS_Store
+Thumbs.db
