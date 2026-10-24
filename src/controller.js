@@ -87,10 +87,14 @@ const knockbacks = {};
 let lastCombatTime = performance.now();
 const edgeGap = (a, b) => { const p = engines[b].nearest(pos[a].x, pos[a].y, COMBAT.inset); return engines[a].edgeDist(...p); };
 const sendWeb = (from, to, now) => {
-  const target = engines[to].nearest(pos[from].x, pos[from].y);
-  engines[from].shootAt?.(...target);
+  const resolve = () => engines[to].nearest(pos[from].x, pos[from].y);
+  engines[from].shootAt?.(...resolve(), resolve);
   electric[from].burst(now);
 };
+function refreshTargets(now, effects = false) {
+  for (const e of list) e.refreshTargets?.();
+  if (effects) for (const e of list) electric[e.theme]?.update(e, now, true);
+}
 const webTouches = (paths, target, tolerance) => paths.some(points => points.some((p, i) => i > 0 && Math.hypot(p[0] - points[0][0], p[1] - points[0][1]) > tolerance && engines[target].edgeDist(...p) <= tolerance));
 function repel(attacker, defender, distance) {
   const a = pos[attacker], b = pos[defender], angle = Math.atan2(a.y - b.y, a.x - b.x);
@@ -114,6 +118,7 @@ function moveKnockbacks(now) {
 }
 function updateCombat(now) {
   moveKnockbacks(now);
+  refreshTargets(now);
   const requested = {}, protectedBy = {}, guardians = {};
   const paths = Object.fromEntries(Object.keys(electric).map(t => [t, engines[t].webPaths?.() || []]));
   for (const t of THEMES) {
@@ -284,7 +289,7 @@ for (const e of list) {
     const step = ev.shiftKey ? 48 : 14, p = pos[e.theme];
     [p.x, p.y] = clampPos(e.theme, p.x + k[0] * step, p.y + k[1] * step);
     e.fling(k[0] * step * 40, k[1] * step * 40);
-    raise(e); e.place(); placeTag(e.theme); markMoved(); remember();
+    raise(e); e.place(); refreshTargets(performance.now(), true); placeTag(e.theme); markMoved(); remember();
   });
 }
 function markMoved() { if (!store.moved) { store.moved = true; save(); } document.body.classList.add('has-moved'); }
@@ -299,7 +304,7 @@ function moveDrag(ev) {
   const [x, y] = clampPos(e.theme, ev.clientX + d.ox, ev.clientY + d.oy);
   e.fling((x - p.x) / dt, (y - p.y) / dt);
   p.x = x; p.y = y; d.lt = now;
-  e.place(); placeTag(e.theme);
+  e.place(); refreshTargets(now, true); placeTag(e.theme);
 }
 function endDrag(ev, cancel) {
   if (!drag || ev.pointerId !== drag.id) return;

@@ -55,8 +55,8 @@ function createElectricity(settings, reduced) {
       combatUntil = now + settings.combatFlash.hold;
       burstUntil = Math.max(burstUntil, combatUntil);
     },
-    update(engine, now) {
-      if (now - last < settings.interval) return;
+    update(engine, now, force = false) {
+      if (!force && now - last < settings.interval) return;
       last = now;
       const paths = !reduced && (engine.hasPointer || now < burstUntil) ? (engine.webPaths?.() || []).slice(0, settings.maxPaths) : [];
       if (paths.length && now >= nextFlash) {

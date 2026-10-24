@@ -39,7 +39,7 @@ function scene() {
         setInfect(value) { this.infectionTarget = cfg.canBeInfected && !this.cleansing ? value : 0; },
         cleanse() { this.infectionTarget = 0; this.cleansing = true; },
         shock() { this.shocks++; }, stopShock() { this.stops++; }, release() { this.releases++; },
-        webPaths() { return this.webs; }, shootAt(x, y) { this.shots.push([x, y]); },
+        webPaths() { return this.webs; }, shootAt(x, y, track) { this.shots.push({ x, y, track }); },
         pointer() { this.pointers++; }, leave() {}, press() {},
       };
       engines[cfg.theme] = engine; return engine;
@@ -174,4 +174,26 @@ test('closest-button pointer routing and keyboard movement also work for Miles',
   assert.equal(s.engines.miles.pointers, 1); assert.equal(s.engines.spidey.pointers, 0);
   s.nodes['btn-miles'].listeners.keydown({ key: 'ArrowLeft', shiftKey: false, preventDefault() {} });
   assert.equal(s.engines.miles.cfg.pos.x, 586);
+});
+
+test('an already fired web resolves the live target after either button moves', () => {
+  const s = scene(); s.place('spidey', 150, 150); s.place('venom', 600, 500); s.place('miles', 800, 500); s.tick();
+  const shot = s.engines.miles.shots[0], original = Array.from(shot.track());
+  s.place('miles', 600, 300); s.place('venom', 700, 450);
+  assert.deepEqual(Array.from(shot.track()), Array.from(s.engines.venom.nearest(600, 300)));
+  assert.notDeepEqual(Array.from(shot.track()), original, 'the target is not the launch-time snapshot');
+});
+
+test('live strand geometry follows both endpoints immediately without adding velocity', () => {
+  const ctx = vm.createContext({});
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/web-tracking.js'), 'utf8'), ctx);
+  const frame = { origin: [0, 0], source: [10, 10], target: [110, 10], scale: 1, growth: 1 };
+  const strand = { pos: new Float32Array([10, 10, 9, 60, 30, 9, 110, 10, 9]), prev: new Float32Array([10, 10, 9, 60, 30, 9, 110, 10, 9]), tgt: [110, 10, 9], tracking: { frame } };
+  ctx.reframeWeb(strand, { ...frame, origin: [20, 30], source: [30, 40] });
+  assert.deepEqual(Array.from(strand.pos), [10, 10, 9, 50, 15, 9, 90, -20, 9]);
+  assert.deepEqual(Array.from(strand.prev), Array.from(strand.pos), 'previous Verlet positions follow the same transform');
+  assert.deepEqual(Array.from(strand.tgt), [90, -20, 9], 'moving Miles leaves the tip pinned to Venom in world space');
+  ctx.reframeWeb(strand, { ...strand.tracking.frame, target: [140, 70] });
+  assert.deepEqual(Array.from(strand.pos.slice(-3)), [120, 40, 9]);
+  assert.deepEqual(Array.from(strand.tgt), [120, 40, 9]);
 });

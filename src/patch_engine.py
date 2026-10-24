@@ -234,6 +234,7 @@ function layoutButton() {
   if (allocReady) alloc();
 }
 function place() {
+  refreshTrackedWebs();
   const ox = cfg.pos.x - (CW * S) / 2, oy = cfg.pos.y - (CH * S) / 2;
   canvas.style.width = `${CW * S}px`; canvas.style.height = `${CH * S}px`;
   canvas.style.transform = `translate3d(${ox}px, ${oy}px, 0)`;
@@ -256,7 +257,7 @@ resize();
 '''
 rep(LAY_OLD, LAY_NEW)
 rep("  while (acc >= SUB && n < 40 && !window.VenomButton?._debug.paused) { step(SUB); acc -= SUB; n++; }",
-    "  cfg.tick?.(api);\n  shockAmt += ((now < shockUntil ? 1 : 0) - shockAmt) * (1 - Math.exp(-dt * 12));\n  while (acc >= SUB && n < 40) { step(SUB); acc -= SUB; n++; }")
+    "  cfg.tick?.(api);\n  refreshTrackedWebs();\n  shockAmt += ((now < shockUntil ? 1 : 0) - shockAmt) * (1 - Math.exp(-dt * 12));\n  while (acc >= SUB && n < 40) { step(SUB); acc -= SUB; n++; }")
 rep("  if (hand.on !== document.body.classList.contains('is-engaged')) document.body.classList.toggle('is-engaged', hand.on);",
     "  if (hand.on !== api.engaged) { api.engaged = hand.on; cfg.onEngage?.(); }")
 rep("  if (slowFor > 2 && quality > 0.8) { quality -= 0.1; slowFor = 0; resize(); }", "  if (slowFor > 1.2 && quality > 0.55) { quality -= 0.1; slowFor = 0; alloc(); }")
@@ -301,6 +302,7 @@ const api = {
   fling(vx, vy) { btn.dvx = vx / S; btn.dvy = vy / S; },
   size: () => ({ hw: btn.hw * S, hh: btn.hh * S }),
   setScale(s) { if (s === S) return; S = s; place(); alloc(); },
+  refreshTargets: refreshTrackedWebs,
   webPaths() {
     return strands.filter(s => s.kind !== 'micro' && s.state !== 'recoil').map(s => {
       const points = [];
@@ -328,6 +330,18 @@ function spawnShot(g, q) {
   const rr = cfg.shotRadius;
   s.vol = Math.PI * rr * rr * (q.d + 40);
   strands.push(s);
+  if (q.track) { s.tracking = { resolve: q.track, frame: null }; refreshTrackedWebs(); }
+}
+function refreshTrackedWebs() {
+  for (const s of strands) {
+    if (!s.tracking || s.state === 'recoil') continue;
+    const target = s.tracking.resolve(), [x, y] = toLocal(...target), g = geo(), anchor = pillEdge(x, y, g);
+    if (Math.hypot(x - anchor.x, y - anchor.y) > P.maxLen) { s.state = 'recoil'; s.tracking = null; continue; }
+    s.lx = (anchor.x - g.cx) / g.hw; s.ly = (anchor.y - g.cy) / g.hh;
+    reframeWeb(s, { origin: [cfg.pos.x - CW * S / 2, cfg.pos.y - CH * S / 2], scale: S,
+      source: [(anchor.x - CW / 2) * S + cfg.pos.x, (anchor.y - CH / 2) * S + cfg.pos.y],
+      target, growth: s.state === 'grow' ? clamp(s.u, 0, 1) : 1 });
+  }
 }
 function spawnProbe(g) {""")
 rep("  for (let i = 0; i < strands.length; i++) stepStrand(strands[i], dt, g, present, inside);",
@@ -347,10 +361,10 @@ rep("  gl.uniform1f(u2.uMorph, hand.m);\n", """  gl.uniform1f(u2.uMorph, hand.m)
   gl.uniform3fv(u2.uIconColor, cfg.iconColor);
   gl.uniform1f(u2.uIconEdge, iconEdge);
 """)
-rep("  fling(vx, vy) {", """  shootAt(px, py) {
+rep("  fling(vx, vy) {", """  shootAt(px, py, track = null) {
     const [x, y] = toLocal(px, py), g = geo(), anchor = pillEdge(x, y, g);
     spawnShot(g, { a: Math.atan2(y - g.cy, x - g.cx), spread: 0,
-      d: Math.hypot(x - anchor.x, y - anchor.y), z: 9, target: [x, y, 9], ttl: (cfg.electricity?.beamDuration || 1000) / 1000 });
+      d: Math.hypot(x - anchor.x, y - anchor.y), z: 9, target: [x, y, 9], track, ttl: (cfg.electricity?.beamDuration || 1000) / 1000 });
   },
   shoot() {
     const n = 5 + Math.floor(Math.random() * 3), base = Math.random() * Math.PI * 2;

@@ -241,6 +241,29 @@ const BUTTON_THEMES = {
 };
 const COMBAT = { reach: 100, release: 150, inset: 5, knockbackDamping: 8, settleSpeed: 8 };
 
+// Reframe a live strand without resetting its shape or injecting Verlet velocity.
+// Both its source and destination stay in world coordinates while either button moves.
+function reframeWeb(strand, frame) {
+  const previous = strand.tracking.frame;
+  if (previous && previous.scale === frame.scale && ['origin', 'source', 'target'].every(key => previous[key].every((v, i) => v === frame[key][i]))) return;
+  if (previous) {
+    const count = strand.pos.length / 3, growth = frame.growth;
+    for (const points of [strand.pos, strand.prev]) {
+      for (let i = 0; i < count; i++) {
+        const weight = i / (count - 1) * growth;
+        for (let axis = 0; axis < 2; axis++) {
+          const deltaSource = frame.source[axis] - previous.source[axis];
+          const deltaTarget = frame.target[axis] - previous.target[axis];
+          const world = points[i * 3 + axis] * previous.scale + previous.origin[axis];
+          points[i * 3 + axis] = (world + (1 - weight) * deltaSource + weight * deltaTarget - frame.origin[axis]) / frame.scale;
+        }
+      }
+    }
+  }
+  strand.tgt = [(frame.target[0] - frame.origin[0]) / frame.scale, (frame.target[1] - frame.origin[1]) / frame.scale, strand.tgt[2]];
+  strand.tracking.frame = frame;
+}
+
 'use strict';
 function createGoo(cfg) {
 const suit = cfg.suit, zeroColor = [0, 0, 0];
@@ -1431,6 +1454,18 @@ function spawnShot(g, q) {
   const rr = cfg.shotRadius;
   s.vol = Math.PI * rr * rr * (q.d + 40);
   strands.push(s);
+  if (q.track) { s.tracking = { resolve: q.track, frame: null }; refreshTrackedWebs(); }
+}
+function refreshTrackedWebs() {
+  for (const s of strands) {
+    if (!s.tracking || s.state === 'recoil') continue;
+    const target = s.tracking.resolve(), [x, y] = toLocal(...target), g = geo(), anchor = pillEdge(x, y, g);
+    if (Math.hypot(x - anchor.x, y - anchor.y) > P.maxLen) { s.state = 'recoil'; s.tracking = null; continue; }
+    s.lx = (anchor.x - g.cx) / g.hw; s.ly = (anchor.y - g.cy) / g.hh;
+    reframeWeb(s, { origin: [cfg.pos.x - CW * S / 2, cfg.pos.y - CH * S / 2], scale: S,
+      source: [(anchor.x - CW / 2) * S + cfg.pos.x, (anchor.y - CH / 2) * S + cfg.pos.y],
+      target, growth: s.state === 'grow' ? clamp(s.u, 0, 1) : 1 });
+  }
 }
 function spawnProbe(g) {
   const dir = Math.random() < 0.5 ? -1 : 1, n = Math.random() < 0.5 ? 2 : 3;
@@ -2053,6 +2088,7 @@ function layoutButton() {
   if (allocReady) alloc();
 }
 function place() {
+  refreshTrackedWebs();
   const ox = cfg.pos.x - (CW * S) / 2, oy = cfg.pos.y - (CH * S) / 2;
   canvas.style.width = `${CW * S}px`; canvas.style.height = `${CH * S}px`;
   canvas.style.transform = `translate3d(${ox}px, ${oy}px, 0)`;
@@ -2082,6 +2118,7 @@ function frame(now) {
   acc += dt;
   let n = 0;
   cfg.tick?.(api);
+  refreshTrackedWebs();
   shockAmt += ((now < shockUntil ? 1 : 0) - shockAmt) * (1 - Math.exp(-dt * 12));
   while (acc >= SUB && n < 40) { step(SUB); acc -= SUB; n++; }
   if (n === 40) acc = 0;
@@ -2134,10 +2171,10 @@ const api = {
       for (const s of strands) if (s.state === 'attached') s.rest *= 0.82;
     }
   },
-  shootAt(px, py) {
+  shootAt(px, py, track = null) {
     const [x, y] = toLocal(px, py), g = geo(), anchor = pillEdge(x, y, g);
     spawnShot(g, { a: Math.atan2(y - g.cy, x - g.cx), spread: 0,
-      d: Math.hypot(x - anchor.x, y - anchor.y), z: 9, target: [x, y, 9], ttl: (cfg.electricity?.beamDuration || 1000) / 1000 });
+      d: Math.hypot(x - anchor.x, y - anchor.y), z: 9, target: [x, y, 9], track, ttl: (cfg.electricity?.beamDuration || 1000) / 1000 });
   },
   shoot() {
     const n = 5 + Math.floor(Math.random() * 3), base = Math.random() * Math.PI * 2;
@@ -2155,6 +2192,7 @@ const api = {
   fling(vx, vy) { btn.dvx = vx / S; btn.dvy = vy / S; },
   size: () => ({ hw: btn.hw * S, hh: btn.hh * S }),
   setScale(s) { if (s === S) return; S = s; place(); alloc(); },
+  refreshTargets: refreshTrackedWebs,
   webPaths() {
     return strands.filter(s => s.kind !== 'micro' && s.state !== 'recoil').map(s => {
       const points = [];
@@ -2224,8 +2262,8 @@ function createElectricity(settings, reduced) {
       combatUntil = now + settings.combatFlash.hold;
       burstUntil = Math.max(burstUntil, combatUntil);
     },
-    update(engine, now) {
-      if (now - last < settings.interval) return;
+    update(engine, now, force = false) {
+      if (!force && now - last < settings.interval) return;
       last = now;
       const paths = !reduced && (engine.hasPointer || now < burstUntil) ? (engine.webPaths?.() || []).slice(0, settings.maxPaths) : [];
       if (paths.length && now >= nextFlash) {
@@ -2330,10 +2368,14 @@ const knockbacks = {};
 let lastCombatTime = performance.now();
 const edgeGap = (a, b) => { const p = engines[b].nearest(pos[a].x, pos[a].y, COMBAT.inset); return engines[a].edgeDist(...p); };
 const sendWeb = (from, to, now) => {
-  const target = engines[to].nearest(pos[from].x, pos[from].y);
-  engines[from].shootAt?.(...target);
+  const resolve = () => engines[to].nearest(pos[from].x, pos[from].y);
+  engines[from].shootAt?.(...resolve(), resolve);
   electric[from].burst(now);
 };
+function refreshTargets(now, effects = false) {
+  for (const e of list) e.refreshTargets?.();
+  if (effects) for (const e of list) electric[e.theme]?.update(e, now, true);
+}
 const webTouches = (paths, target, tolerance) => paths.some(points => points.some((p, i) => i > 0 && Math.hypot(p[0] - points[0][0], p[1] - points[0][1]) > tolerance && engines[target].edgeDist(...p) <= tolerance));
 function repel(attacker, defender, distance) {
   const a = pos[attacker], b = pos[defender], angle = Math.atan2(a.y - b.y, a.x - b.x);
@@ -2357,6 +2399,7 @@ function moveKnockbacks(now) {
 }
 function updateCombat(now) {
   moveKnockbacks(now);
+  refreshTargets(now);
   const requested = {}, protectedBy = {}, guardians = {};
   const paths = Object.fromEntries(Object.keys(electric).map(t => [t, engines[t].webPaths?.() || []]));
   for (const t of THEMES) {
@@ -2527,7 +2570,7 @@ for (const e of list) {
     const step = ev.shiftKey ? 48 : 14, p = pos[e.theme];
     [p.x, p.y] = clampPos(e.theme, p.x + k[0] * step, p.y + k[1] * step);
     e.fling(k[0] * step * 40, k[1] * step * 40);
-    raise(e); e.place(); placeTag(e.theme); markMoved(); remember();
+    raise(e); e.place(); refreshTargets(performance.now(), true); placeTag(e.theme); markMoved(); remember();
   });
 }
 function markMoved() { if (!store.moved) { store.moved = true; save(); } document.body.classList.add('has-moved'); }
@@ -2542,7 +2585,7 @@ function moveDrag(ev) {
   const [x, y] = clampPos(e.theme, ev.clientX + d.ox, ev.clientY + d.oy);
   e.fling((x - p.x) / dt, (y - p.y) / dt);
   p.x = x; p.y = y; d.lt = now;
-  e.place(); placeTag(e.theme);
+  e.place(); refreshTargets(now, true); placeTag(e.theme);
 }
 function endDrag(ev, cancel) {
   if (!drag || ev.pointerId !== drag.id) return;
